@@ -1,0 +1,23 @@
+{
+  "name": "the-gaming-grimoire",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TheGamingGrimoire - a wiki and community tracker for video games, board games and card games.",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server",
+    "seed": "npm run seed -w server"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "@embedded-postgres/windows-x64@17.10.0-beta.17": true
+  }
+}
