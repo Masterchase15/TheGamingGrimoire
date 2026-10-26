@@ -1,0 +1,22 @@
+{
+  "name": "@tgg/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/seed/run.js",
+    "localdb": "node src/db/local-postgres.js"
+  },
+  "dependencies": {
+    "better-auth": "1.3.34",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "pg": "^8.16.3",
+    "sanitize-html": "^2.18.1"
+  },
+  "optionalDependencies": {
+    "embedded-postgres": "17.10.0-beta.17"
+  }
+}

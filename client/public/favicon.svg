@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <rect width="16" height="16" fill="#09090b"/>
+  <!-- Pixel grimoire: gold book with a dark spine and a sigil. -->
+  <path fill="#ffd23f" d="M3 2h9v1h1v11H4v-1H3zM4 13h8V4H5v9H4z"/>
+  <path fill="#ffd23f" d="M5 3h7v10H5z"/>
+  <path fill="#09090b" d="M5 3h1v10H5z"/>
+  <path fill="#09090b" d="M8 5h2v1h1v2h-1v1H8V8H7V6h1z"/>
+  <path fill="#ff5a36" d="M8 6h2v2H8z"/>
+</svg>

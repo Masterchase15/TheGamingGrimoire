@@ -1,0 +1,555 @@
+/* ==========================================================================
+   Fandom wiki: MediaWiki content rendered inside the grimoire.
+   Uses the tokens from global.css.
+   ========================================================================== */
+.fandom-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.fandom-dot {
+  width: 8px;
+  height: 8px;
+  background: #fa005a;
+  box-shadow: 0 0 10px rgba(250, 0, 90, 0.6);
+}
+.fandom-attrib {
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+.fandom-attrib a {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fandom-attrib a:hover {
+  color: var(--gold);
+}
+
+/* --- Game page block --- */
+.wiki-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+@media (min-width: 720px) {
+  .wiki-hero {
+    grid-template-columns: minmax(200px, 300px) 1fr;
+  }
+}
+.wiki-hero-img {
+  position: relative;
+  min-height: 220px;
+  background: var(--bg-2);
+}
+.wiki-hero-img img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+.wiki-hero-body {
+  padding: var(--s5);
+}
+.wiki-hero-body h3 {
+  margin: 10px 0 12px;
+  font-family: var(--font-display);
+  font-stretch: 115%;
+  font-weight: 850;
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  text-transform: uppercase;
+}
+.wiki-hero-body p {
+  max-width: 62ch;
+  line-height: 1.7;
+}
+.wiki-search {
+  position: relative;
+}
+.wiki-search-results {
+  margin-top: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.wiki-search.compact {
+  margin-top: var(--s4);
+}
+.wiki-search.compact .search-input {
+  height: 42px;
+  font-size: 0.875rem;
+}
+.wiki-search.compact .wiki-search-results {
+  max-height: 300px;
+}
+.wiki-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  transition: background var(--fast), border-color var(--fast);
+}
+.wiki-search-item:last-child {
+  border-bottom: 0;
+}
+.wiki-search-item:hover {
+  background: var(--panel-2);
+  border-left-color: var(--gold);
+}
+.wiki-search-title {
+  font-weight: 650;
+  font-size: 0.93rem;
+}
+.wiki-search-snippet {
+  font-size: 0.82rem;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.topic-grid {
+  display: grid;
+  gap: var(--s4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+}
+.topic-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  transition:
+    border-color var(--med),
+    transform var(--med) var(--ease),
+    box-shadow var(--med) var(--ease);
+}
+.topic-card:hover {
+  border-color: var(--gold);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+.topic-img {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 16px),
+    var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.topic-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  transition: transform 600ms var(--ease);
+}
+.topic-img.is-icon img {
+  object-fit: contain;
+  padding: 14px;
+}
+.topic-card:hover .topic-img img {
+  transform: scale(1.05);
+}
+.topic-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-weight: 900;
+  font-size: 3rem;
+  color: rgba(255, 210, 63, 0.35);
+}
+.topic-body {
+  padding: var(--s4);
+}
+.topic-body h4 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 650;
+}
+.topic-body h4 svg {
+  flex-shrink: 0;
+  color: var(--gold);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity var(--fast),
+    transform var(--fast);
+}
+.topic-card:hover .topic-body h4 svg {
+  opacity: 1;
+  transform: none;
+}
+.topic-body p {
+  margin-top: 8px;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- Article page --- */
+.wiki-toc .wiki-nav-link {
+  padding-block: 7px;
+  font-size: 0.85rem;
+}
+.wiki-toc .wiki-nav-link.sub {
+  padding-left: 24px;
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+.fandom-head {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+.fandom-foot {
+  margin-top: var(--s7);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+.fandom-article {
+  max-width: none;
+}
+.fandom-article::after {
+  content: '';
+  display: block;
+  clear: both;
+}
+.fandom-article p,
+.fandom-article ul,
+.fandom-article ol,
+.fandom-article dl {
+  max-width: 78ch;
+}
+.fandom-article [id] {
+  scroll-margin-top: calc(var(--nav-h) + 24px);
+}
+.fandom-article h2,
+.fandom-article h3,
+.fandom-article .mw-heading2,
+.fandom-article .mw-heading3 {
+  clear: both;
+}
+.fandom-article img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+.fandom-article a {
+  color: var(--gold);
+}
+.fandom-article a[target='_blank']::after {
+  content: '↗';
+  margin-left: 2px;
+  font-size: 0.7em;
+  opacity: 0.6;
+}
+.fandom-article a.image::after,
+.fandom-article a.mw-file-description::after,
+.fandom-article figure a::after,
+.fandom-article .pi-image a::after {
+  content: none;
+}
+.fandom-article table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+}
+.fandom-article td,
+.fandom-article th {
+  border: 1px solid var(--line);
+}
+.fandom-article dl dt {
+  margin-top: 1em;
+  font-weight: 700;
+  color: var(--text);
+}
+.fandom-article dd {
+  margin-left: 1.2em;
+}
+.fandom-article sup {
+  font-size: 0.7em;
+}
+.fandom-article .references,
+.fandom-article .reflist {
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+
+/* Portable infobox */
+.fandom-article .portable-infobox,
+.fandom-article table.infobox {
+  width: 100%;
+  margin: 0 0 var(--s5);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  box-shadow: inset 0 3px 0 var(--gold);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+@media (min-width: 900px) {
+  .fandom-article .portable-infobox,
+  .fandom-article table.infobox {
+    float: right;
+    width: 300px;
+    margin: 0 0 var(--s5) var(--s5);
+  }
+}
+.fandom-article .pi-title,
+.fandom-article .pi-header {
+  margin: 0;
+  padding: 14px 16px 10px;
+  border: 0;
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  font-weight: 850;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.fandom-article .pi-header {
+  padding: 10px 16px;
+  background: var(--bg-2);
+  border-block: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: var(--gold);
+}
+.fandom-article .pi-image,
+.fandom-article .pi-media {
+  margin: 0;
+  padding: 0 12px 12px;
+  text-align: center;
+}
+.fandom-article .pi-image img,
+.fandom-article .pi-media img {
+  width: auto;
+  max-height: 360px;
+}
+.fandom-article .pi-caption {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+.fandom-article .pi-data {
+  display: grid;
+  grid-template-columns: 38% 1fr;
+  gap: 10px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--line);
+}
+.fandom-article .pi-data-label {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.fandom-article .pi-data-value {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.fandom-article .pi-data-value ul {
+  margin: 0;
+  padding-left: 1em;
+}
+.fandom-article .portable-infobox table {
+  display: table;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.fandom-article .portable-infobox td,
+.fandom-article .portable-infobox th {
+  padding: 6px 10px;
+  border: 0;
+  text-align: center;
+}
+.fandom-article .wds-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px 0;
+  list-style: none;
+}
+.fandom-article .wds-tabs__tab {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Images & thumbnails */
+.fandom-article figure,
+.fandom-article .thumb {
+  margin: 0 0 var(--s4);
+}
+.fandom-article figure[typeof~='mw:File/Thumb'],
+.fandom-article figure.thumb,
+.fandom-article .thumb.tright,
+.fandom-article .thumb.tleft {
+  max-width: 300px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+@media (min-width: 900px) {
+  .fandom-article .thumb.tright,
+  .fandom-article figure.mw-halign-right,
+  .fandom-article figure[typeof~='mw:File/Thumb']:not(.mw-halign-left):not(.mw-halign-center) {
+    float: right;
+    clear: right;
+    margin: 0 0 var(--s4) var(--s5);
+  }
+  .fandom-article .thumb.tleft,
+  .fandom-article figure.mw-halign-left {
+    float: left;
+    clear: left;
+    margin: 0 var(--s5) var(--s4) 0;
+  }
+}
+.fandom-article figcaption,
+.fandom-article .thumbcaption {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+.fandom-article .wikia-gallery,
+.fandom-article ul.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+  clear: both;
+}
+.fandom-article .wikia-gallery-item,
+.fandom-article li.gallerybox {
+  width: 150px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+.fandom-article li.gallerybox::marker {
+  content: none;
+}
+.fandom-article .wikia-gallery-item img,
+.fandom-article li.gallerybox img {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+}
+
+/* Notices, quotes and tab strips */
+.fandom-article .msgbox,
+.fandom-article .notice,
+.fandom-article .ambox {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  max-width: 78ch;
+  margin: 0 0 var(--s4);
+  padding: 12px 14px;
+  border-left: 3px solid var(--ember);
+  background: var(--ember-soft);
+  color: #ffd6cc;
+  font-size: 0.88rem;
+}
+.fandom-article .msgbox img {
+  width: 28px;
+  height: auto;
+}
+.fandom-article .quote,
+.fandom-article .cquote,
+.fandom-article blockquote {
+  max-width: 78ch;
+  margin: 0 0 var(--s4);
+  padding: 14px 18px;
+  border-left: 3px solid var(--gold);
+  background: var(--gold-soft);
+  font-style: italic;
+  color: var(--text);
+}
+.fandom-article .custom-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--s4);
+}
+.fandom-article .custom-tabs a,
+.fandom-article .custom-tabs strong {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+.fandom-article .custom-tabs a::after {
+  content: none;
+}
+.fandom-article .custom-tabs strong {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--gold-ink);
+}
+.fandom-article .mw-collapsible-toggle {
+  display: none;
+}
+/* Tabbed infobox images: without Fandom's JS, show only the default tab. */
+.fandom-article .wds-tab__content:not(.wds-is-current) {
+  display: none;
+}
+.fandom-article .wds-tabs__wrapper {
+  display: none;
+}
+
+/* Fandom duplicates some notices for mobile skins. */
+.fandom-article .mobileonly,
+.fandom-article .mobile-only,
+.fandom-article .mobile-show {
+  display: none;
+}

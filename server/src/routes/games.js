@@ -1,0 +1,251 @@
+import { Router } from 'express';
+import { query } from '../db/pool.js';
+import { lookupHltb, hltbUrl } from '../lib/hltb.js';
+import { HttpError } from '../lib/session.js';
+import { statusesFor } from '../lib/statuses.js';
+import { plainExcerpt, steamStoreUrl } from '../lib/steam.js';
+import { refreshGameNewsIfStale } from '../lib/steamSync.js';
+import { getArticle, getOverview, searchWiki } from '../lib/fandom.js';
+
+const router = Router();
+
+const LIST_COLUMNS = `g.id, g.slug, g.title, g.category, g.tagline, g.genres, g.platforms, g.release_year,
+  g.players, g.play_time, g.is_continuous, g.featured, g.hue, g.hltb_main,
+  g.capsule_url, g.header_url, g.current_version, g.last_update_at,
+  (SELECT count(*)::int FROM wiki_sections s WHERE s.game_id = g.id) AS section_count,
+  (SELECT count(*)::int FROM user_games ug WHERE ug.game_id = g.id) AS member_count`;
+
+const CATEGORIES = new Set(['video', 'board', 'card']);
+const SORTS = {
+  popular: 'member_count DESC, g.featured DESC, g.title ASC',
+  title: 'g.title ASC',
+  newest: 'g.release_year DESC NULLS LAST, g.title ASC',
+};
+
+router.get('/', async (req, res) => {
+  const { category, q, genre, featured } = req.query;
+  const where = [];
+  const params = [];
+  if (category) {
+    if (!CATEGORIES.has(category)) throw new HttpError(400, 'Unknown category.');
+    params.push(category);
+    where.push(`g.category = $${params.length}`);
+  }
+  if (q) {
+    params.push(`%${q}%`);
+    const p = `$${params.length}`;
+    where.push(`(g.title ILIKE ${p} OR array_to_string(g.aliases, ' ') ILIKE ${p} OR array_to_string(g.genres, ' ') ILIKE ${p})`);
+  }
+  if (genre) {
+    params.push(genre);
+    where.push(`$${params.length} = ANY(g.genres)`);
+  }
+  if (featured) where.push('g.featured');
+  const order = SORTS[req.query.sort] || SORTS.popular;
+
+  const { rows } = await query(
+    `SELECT ${LIST_COLUMNS} FROM games g ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order}`,
+    params
+  );
+
+  // Genre facets for the category page filter chips.
+  const genres = [...new Set(rows.flatMap((r) => r.genres))].sort();
+  res.json({ games: rows, genres });
+});
+
+router.get('/stats', async (_req, res) => {
+  const { rows } = await query(
+    `SELECT category, count(*)::int AS count FROM games GROUP BY category`
+  );
+  const counts = Object.fromEntries(rows.map((r) => [r.category, r.count]));
+  const { rows: [pages] } = await query(`SELECT count(*)::int AS count FROM wiki_sections`);
+  const { rows: [terms] } = await query(`SELECT count(*)::int AS count FROM glossary_terms`);
+  res.json({ counts, pages: pages.count, terms: terms.count });
+});
+
+const HLTB_FRESH_DAYS = 14;
+const HLTB_RETRY_DAYS = 1;
+
+// Look up completion times for finite video games, refreshing stale cache entries.
+async function ensureHltb(game) {
+  if (game.category !== 'video' || game.is_continuous) return game;
+  const checked = game.hltb_checked_at ? new Date(game.hltb_checked_at).getTime() : 0;
+  const maxAgeDays = game.hltb_id ? HLTB_FRESH_DAYS : HLTB_RETRY_DAYS;
+  if (Date.now() - checked < maxAgeDays * 86400000) return game;
+  try {
+    const hit = await lookupHltb(game.hltb_query || game.title, game.release_year);
+    const { rows } = await query(
+      `UPDATE games SET hltb_id = $2, hltb_name = $3, hltb_main = $4, hltb_extra = $5, hltb_complete = $6,
+         hltb_checked_at = now() WHERE id = $1 RETURNING *`,
+      [game.id, hit?.id ?? null, hit?.name ?? null, hit?.main ?? null, hit?.extra ?? null, hit?.complete ?? null]
+    );
+    return rows[0];
+  } catch (err) {
+    console.warn(`[hltb] lookup failed for "${game.title}": ${err.message}`);
+    // Keep any older cached values; try again tomorrow.
+    await query(`UPDATE games SET hltb_checked_at = now() - interval '${HLTB_FRESH_DAYS - HLTB_RETRY_DAYS} days' WHERE id = $1`, [game.id]);
+    return game;
+  }
+}
+
+function hltbPayload(game) {
+  if (game.category !== 'video' || game.is_continuous) return null;
+  if (!game.hltb_id) return { found: false };
+  return {
+    found: true,
+    id: game.hltb_id,
+    name: game.hltb_name,
+    main: game.hltb_main,
+    extra: game.hltb_extra,
+    complete: game.hltb_complete,
+    url: hltbUrl(game.hltb_id),
+  };
+}
+
+router.get('/:slug', async (req, res) => {
+  const { rows } = await query(`SELECT * FROM games WHERE slug = $1`, [req.params.slug]);
+  if (!rows[0]) throw new HttpError(404, 'Game not found.');
+  const game = await ensureHltb(rows[0]);
+
+  refreshGameNewsIfStale(game);
+
+  const [sections, statusCounts, entry, threads, updates] = await Promise.all([
+    query(
+      `SELECT s.slug, s.title, s.icon, s.summary,
+        (SELECT count(*)::int FROM glossary_terms t WHERE t.section_id = s.id) AS term_count
+       FROM wiki_sections s WHERE s.game_id = $1 ORDER BY s.sort_order, s.id`,
+      [game.id]
+    ),
+    query(`SELECT status, count(*)::int AS count FROM user_games WHERE game_id = $1 GROUP BY status`, [game.id]),
+    req.user
+      ? query(`SELECT status, rating, hours, notes, favorite, updated_at FROM user_games WHERE user_id = $1 AND game_id = $2`, [req.user.id, game.id])
+      : { rows: [] },
+    query(`SELECT count(*)::int AS count FROM forum_threads WHERE game_id = $1`, [game.id]),
+    game.category === 'video'
+      ? query(
+          `SELECT id, title, url, version, published_at, left(content, 1500) AS excerpt
+           FROM game_updates WHERE game_id = $1 ORDER BY published_at DESC LIMIT 10`,
+          [game.id]
+        )
+      : { rows: [] },
+  ]);
+
+  if (req.user) {
+    query(
+      `INSERT INTO game_views (user_id, game_id) VALUES ($1, $2)
+       ON CONFLICT (user_id, game_id) DO UPDATE SET viewed_at = now()`,
+      [req.user.id, game.id]
+    ).catch(() => {});
+  }
+
+  const {
+    hltb_query, hltb_id, hltb_name, hltb_main, hltb_extra, hltb_complete, hltb_checked_at,
+    steam_assets_checked_at, news_checked_at, fandom_topics, fandom_page, patch_exclude, ...publicGame
+  } = game;
+
+  res.json({
+    game: { ...publicGame, statuses: statusesFor(game) },
+    sections: sections.rows,
+    hltb: hltbPayload(game),
+    stats: Object.fromEntries(statusCounts.rows.map((r) => [r.status, r.count])),
+    threadCount: threads.rows[0].count,
+    steam: game.steam_appid
+      ? {
+          appid: game.steam_appid,
+          storeUrl: steamStoreUrl(game.steam_appid),
+          currentVersion: game.current_version,
+          lastUpdateAt: game.last_update_at,
+          checkedAt: game.news_checked_at,
+        }
+      : null,
+    updates: updates.rows.map((u) => ({ ...u, excerpt: plainExcerpt(u.excerpt) })),
+    entry: entry.rows[0] ?? null,
+  });
+});
+
+async function fandomGame(slug) {
+  const { rows } = await query(
+    `SELECT slug, fandom_wiki, fandom_page, fandom_topics FROM games WHERE slug = $1`,
+    [slug]
+  );
+  if (!rows[0]) throw new HttpError(404, 'Game not found.');
+  if (!rows[0].fandom_wiki) throw new HttpError(404, 'This game has no Fandom wiki.');
+  return rows[0];
+}
+
+const fandomFailure = (err) =>
+  err instanceof HttpError ? err : new HttpError(502, 'The Fandom wiki could not be reached. Try again in a moment.');
+
+// Fandom overview: main article summary + featured topics. Returns { fandom: null } when the game has no wiki.
+router.get('/:slug/fandom', async (req, res) => {
+  const { rows } = await query(`SELECT fandom_wiki, fandom_page, fandom_topics FROM games WHERE slug = $1`, [req.params.slug]);
+  if (!rows[0]) throw new HttpError(404, 'Game not found.');
+  if (!rows[0].fandom_wiki) return res.json({ fandom: null });
+  try {
+    const fandom = await getOverview({ wiki: rows[0].fandom_wiki, page: rows[0].fandom_page, topics: rows[0].fandom_topics });
+    res.json({ fandom });
+  } catch (err) {
+    console.warn(`[fandom] overview ${req.params.slug}: ${err.message}`);
+    throw fandomFailure(err);
+  }
+});
+
+router.get('/:slug/fandom/page', async (req, res) => {
+  const title = String(req.query.title || '').trim();
+  if (!title) throw new HttpError(400, 'Missing page title.');
+  const game = await fandomGame(req.params.slug);
+  try {
+    const article = await getArticle(game.fandom_wiki, title, game.slug);
+    res.json({ article, wiki: game.fandom_wiki });
+  } catch (err) {
+    if (!(err instanceof HttpError)) console.warn(`[fandom] page ${title}: ${err.message}`);
+    throw fandomFailure(err);
+  }
+});
+
+router.get('/:slug/fandom/search', async (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 100);
+  if (!q) return res.json({ results: [] });
+  const game = await fandomGame(req.params.slug);
+  try {
+    res.json({ results: await searchWiki(game.fandom_wiki, q) });
+  } catch (err) {
+    throw fandomFailure(err);
+  }
+});
+
+router.get('/:slug/updates/:id', async (req, res) => {
+  const { rows } = await query(
+    `SELECT u.id, u.title, u.url, u.author, u.version, u.content, u.published_at,
+       g.slug AS game_slug, g.title AS game_title, g.hero_url, g.capsule_url, g.hue, g.category
+     FROM game_updates u JOIN games g ON g.id = u.game_id
+     WHERE g.slug = $1 AND u.id = $2`,
+    [req.params.slug, Number(req.params.id)]
+  );
+  if (!rows[0]) throw new HttpError(404, 'Update not found.');
+  res.json({ update: rows[0] });
+});
+
+router.get('/:slug/sections/:section', async (req, res) => {
+  const { rows } = await query(
+    `SELECT s.id, s.slug, s.title, s.icon, s.summary, s.content,
+       g.slug AS game_slug, g.title AS game_title, g.category AS game_category, g.hue AS game_hue,
+       g.capsule_url AS game_capsule, g.hero_url AS game_hero
+     FROM wiki_sections s JOIN games g ON g.id = s.game_id
+     WHERE g.slug = $1 AND s.slug = $2`,
+    [req.params.slug, req.params.section]
+  );
+  if (!rows[0]) throw new HttpError(404, 'Wiki page not found.');
+  const { id, ...section } = rows[0];
+  const [terms, siblings] = await Promise.all([
+    query(`SELECT term, definition, grp FROM glossary_terms WHERE section_id = $1 ORDER BY sort_order, term`, [id]),
+    query(
+      `SELECT s.slug, s.title, s.icon FROM wiki_sections s JOIN games g ON g.id = s.game_id
+       WHERE g.slug = $1 ORDER BY s.sort_order, s.id`,
+      [req.params.slug]
+    ),
+  ]);
+  res.json({ section, terms: terms.rows, siblings: siblings.rows });
+});
+
+export default router;
