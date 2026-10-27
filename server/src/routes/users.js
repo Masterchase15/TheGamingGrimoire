@@ -47,7 +47,7 @@ async function relationship(viewerId, userId) {
 
 router.get('/:username', async (req, res) => {
   const user = await findUser(req.params.username);
-  const [rel, counts, nowPlaying, activity, friendCount] = await Promise.all([
+  const [rel, counts, nowPlaying, activity, friendCount, reviewCount] = await Promise.all([
     relationship(req.user?.id, user.id),
     query(`SELECT status, count(*)::int AS count FROM user_games WHERE user_id = $1 GROUP BY status`, [user.id]),
     query(
@@ -61,6 +61,7 @@ router.get('/:username', async (req, res) => {
       `SELECT count(*)::int AS count FROM friendships WHERE status = 'accepted' AND (requester_id = $1 OR addressee_id = $1)`,
       [user.id]
     ),
+    query(`SELECT count(*)::int AS count FROM reviews WHERE user_id = $1`, [user.id]),
   ]);
   res.json({
     user,
@@ -69,6 +70,7 @@ router.get('/:username', async (req, res) => {
     nowPlaying: nowPlaying.rows,
     activity: activity.rows,
     friendCount: friendCount.rows[0].count,
+    reviewCount: reviewCount.rows[0].count,
   });
 });
 
@@ -83,6 +85,18 @@ router.get('/:username/library', async (req, res) => {
     [user.id, req.user?.id ?? null]
   );
   res.json({ user, entries: rows });
+});
+
+router.get('/:username/reviews', async (req, res) => {
+  const user = await findUser(req.params.username);
+  const { rows } = await query(
+    `SELECT r.id, r.score, r.body, r.created_at, r.updated_at,
+       g.id AS game_id, g.slug, g.title, g.category, g.hue, g.capsule_url, g.release_year
+     FROM reviews r JOIN games g ON g.id = r.game_id
+     WHERE r.user_id = $1 ORDER BY r.updated_at DESC`,
+    [user.id]
+  );
+  res.json({ reviews: rows });
 });
 
 export default router;

@@ -11,6 +11,7 @@ import {
   Info,
   NotePencil,
   Plus,
+  Star,
   SteamLogo,
   Users,
 } from '@phosphor-icons/react';
@@ -25,7 +26,8 @@ import { SectionIcon } from '../components/Icons.jsx';
 import { Crumbs, Empty, ErrorState, Markdown, Spinner } from '../components/Common.jsx';
 import { SectionHead } from './Home.jsx';
 import { ThreadList } from './Forums.jsx';
-import { FandomMark, FandomOverview } from '../components/Fandom.jsx';
+import { FandomMark, FandomOverview, wikiPath } from '../components/Fandom.jsx';
+import { GameReviews } from '../components/Reviews.jsx';
 
 export default function Game() {
   const { slug } = useParams();
@@ -36,6 +38,8 @@ export default function Game() {
   const fandomReq = useApi(`/games/${slug}/fandom`);
   const fandom = fandomReq.data?.fandom;
   const [editing, setEditing] = useState(false);
+  // Kept in sync by the reviews section so the hero and subnav update after posting.
+  const [reviewSummary, setReviewSummary] = useState(null);
 
   // Honor #patch-notes / #discussions deep links once content exists.
   useEffect(() => {
@@ -60,6 +64,9 @@ export default function Game() {
   }
 
   const { game, sections, hltb, stats, entry, threadCount, steam, updates } = data;
+  const reviews = reviewSummary ?? data.reviews;
+  // "Read the wiki" opens the game's Fandom article; games without one fall back to the first quick guide.
+  const wikiLink = game.fandom_page ? wikiPath(game.slug, game.fandom_page) : sections[0] && `/game/${game.slug}/${sections[0].slug}`;
   const cat = CATEGORIES[game.category];
   const totalMembers = Object.values(stats).reduce((a, b) => a + b, 0);
   const showPatches = game.category === 'video';
@@ -84,6 +91,7 @@ export default function Game() {
     ['overview', 'Overview'],
     showPatches && ['patch-notes', 'Patch notes', updates.length],
     ['wiki', 'Wiki', fandom ? fandom.topics.length + sections.length : sections.length],
+    ['reviews', 'Reviews', reviews.count],
     ['discussions', 'Discussions', threadCount],
   ].filter(Boolean);
 
@@ -110,6 +118,12 @@ export default function Game() {
               {game.is_continuous && <LiveChip glass />}
               {game.current_version && <span className="chip chip-gold chip-glass">v{game.current_version}</span>}
               {entry && <StatusBadge status={entry.status} />}
+              {reviews.count > 0 && (
+                <a href="#reviews" className="chip chip-glass" title="Grimoire score">
+                  <Star size={12} weight="fill" color="var(--gold)" aria-hidden="true" /> {reviews.average.toFixed(1)}/10 ·{' '}
+                  {reviews.count} {reviews.count === 1 ? 'review' : 'reviews'}
+                </a>
+              )}
             </div>
             <h1 className="display game-title">{game.title}</h1>
             {game.tagline && <p className="game-tagline">{game.tagline}</p>}
@@ -123,8 +137,8 @@ export default function Game() {
                   <Plus size={18} weight="bold" aria-hidden="true" /> Add to library
                 </button>
               )}
-              {sections[0] && (
-                <Link className="btn" to={`/game/${game.slug}/${sections[0].slug}`}>
+              {wikiLink && (
+                <Link className="btn" to={wikiLink}>
                   <BookOpen size={18} weight="bold" aria-hidden="true" /> Read the wiki
                 </Link>
               )}
@@ -231,9 +245,18 @@ export default function Game() {
               </div>
             </section>
 
-            <section id="discussions" className="section">
+            <section id="reviews" className="section">
               <SectionHead
                 index={showPatches ? '04' : '03'}
+                kicker="Verdicts"
+                title="Reviews"
+              />
+              <GameReviews game={game} signedIn={Boolean(session?.user)} onChange={setReviewSummary} />
+            </section>
+
+            <section id="discussions" className="section">
+              <SectionHead
+                index={showPatches ? '05' : '04'}
                 kicker="Community"
                 title="Discussions"
                 link={
