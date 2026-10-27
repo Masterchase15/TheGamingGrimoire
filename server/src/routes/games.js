@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db/pool.js';
 import { lookupHltb, hltbUrl } from '../lib/hltb.js';
-import { HttpError } from '../lib/session.js';
+import { HttpError, requireUser } from '../lib/session.js';
 import { statusesFor } from '../lib/statuses.js';
 import { plainExcerpt, steamStoreUrl } from '../lib/steam.js';
 import { refreshGameNewsIfStale } from '../lib/steamSync.js';
@@ -109,7 +109,7 @@ router.get('/:slug', async (req, res) => {
 
   refreshGameNewsIfStale(game);
 
-  const [sections, statusCounts, entry, threads, updates] = await Promise.all([
+  const [sections, statusCounts, entry, threads, updates, reviews] = await Promise.all([
     query(
       `SELECT s.slug, s.title, s.icon, s.summary,
         (SELECT count(*)::int FROM glossary_terms t WHERE t.section_id = s.id) AS term_count
@@ -128,6 +128,7 @@ router.get('/:slug', async (req, res) => {
           [game.id]
         )
       : { rows: [] },
+    query(`SELECT count(*)::int AS count, round(avg(score)::numeric, 1)::float AS average FROM reviews WHERE game_id = $1`, [game.id]),
   ]);
 
   if (req.user) {
@@ -142,13 +143,16 @@ router.get('/:slug', async (req, res) => {
     hltb_query, hltb_id, hltb_name, hltb_main, hltb_extra, hltb_complete, hltb_checked_at,
     steam_assets_checked_at, news_checked_at, fandom_topics, fandom_page, patch_exclude, ...publicGame
   } = game;
+  // The Fandom article "Read the wiki" opens; defaults to the game's own title on its wiki.
+  const fandomPage = game.fandom_wiki ? fandom_page || game.title : null;
 
   res.json({
-    game: { ...publicGame, statuses: statusesFor(game) },
+    game: { ...publicGame, fandom_page: fandomPage, statuses: statusesFor(game) },
     sections: sections.rows,
     hltb: hltbPayload(game),
     stats: Object.fromEntries(statusCounts.rows.map((r) => [r.status, r.count])),
     threadCount: threads.rows[0].count,
+    reviews: reviews.rows[0],
     steam: game.steam_appid
       ? {
           appid: game.steam_appid,
@@ -212,6 +216,58 @@ router.get('/:slug/fandom/search', async (req, res) => {
   } catch (err) {
     throw fandomFailure(err);
   }
+});
+
+const reviewSelect = `
+  SELECT r.id, r.score, r.body, r.created_at, r.updated_at,
+    json_build_object('username', u.username, 'name', u.name, 'image', u.image) AS author
+  FROM reviews r JOIN "user" u ON u.id = r.user_id`;
+
+async function gameIdFor(slug) {
+  const { rows } = await query(`SELECT id FROM games WHERE slug = $1`, [slug]);
+  if (!rows[0]) throw new HttpError(404, 'Game not found.');
+  return rows[0].id;
+}
+
+// Reviews for a game, newest first, plus the average score and the viewer's own review.
+router.get('/:slug/reviews', async (req, res) => {
+  const gameId = await gameIdFor(req.params.slug);
+  const [list, summary, mine] = await Promise.all([
+    query(`${reviewSelect} WHERE r.game_id = $1 ORDER BY r.updated_at DESC LIMIT 100`, [gameId]),
+    query(`SELECT count(*)::int AS count, round(avg(score)::numeric, 1)::float AS average FROM reviews WHERE game_id = $1`, [gameId]),
+    req.user ? query(`${reviewSelect} WHERE r.game_id = $1 AND r.user_id = $2`, [gameId, req.user.id]) : { rows: [] },
+  ]);
+  res.json({ reviews: list.rows, count: summary.rows[0].count, average: summary.rows[0].average, mine: mine.rows[0] ?? null });
+});
+
+router.put('/:slug/reviews', requireUser, async (req, res) => {
+  const gameId = await gameIdFor(req.params.slug);
+  const score = Number(req.body.score);
+  if (!Number.isInteger(score) || score < 1 || score > 10) throw new HttpError(400, 'Score must be a whole number from 1 to 10.');
+  const body = req.body.body ? String(req.body.body).trim().slice(0, 5000) || null : null;
+  const { rows: [saved] } = await query(
+    `INSERT INTO reviews (user_id, game_id, score, body) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, game_id) DO UPDATE SET score = $3, body = $4, updated_at = now()
+     RETURNING id, (xmax = 0) AS created`,
+    [req.user.id, gameId, score, body]
+  );
+  // New reviews show up in friends' feeds; edits don't.
+  if (saved.created) {
+    await query(`INSERT INTO activities (user_id, type, game_id, meta) VALUES ($1, 'review', $2, $3)`, [
+      req.user.id,
+      gameId,
+      { score },
+    ]);
+  }
+  const { rows: [review] } = await query(`${reviewSelect} WHERE r.id = $1`, [saved.id]);
+  res.json({ review });
+});
+
+router.delete('/:slug/reviews', requireUser, async (req, res) => {
+  const gameId = await gameIdFor(req.params.slug);
+  await query(`DELETE FROM reviews WHERE user_id = $1 AND game_id = $2`, [req.user.id, gameId]);
+  await query(`DELETE FROM activities WHERE user_id = $1 AND game_id = $2 AND type = 'review'`, [req.user.id, gameId]);
+  res.json({ ok: true });
 });
 
 router.get('/:slug/updates/:id', async (req, res) => {

@@ -16,6 +16,9 @@ const LINKS = [
   { to: '/community', label: 'Community' },
 ];
 
+// "Profile" sits right after Home once signed in.
+const navLinks = (user) => (user ? [LINKS[0], { to: `/u/${user.username}`, label: 'Profile' }, ...LINKS.slice(1)] : LINKS);
+
 export function Brand() {
   return (
     <Link to="/" className="brand" aria-label="TheGamingGrimoire home">
@@ -229,7 +232,7 @@ export default function Layout() {
         <div className="container nav-inner">
           <Brand />
           <nav className="nav-links" aria-label="Main">
-            {LINKS.map((l) => (
+            {navLinks(user).map((l) => (
               <NavLink key={l.to} to={l.to} end={l.end} className="nav-link">
                 {l.label}
               </NavLink>
@@ -268,7 +271,7 @@ export default function Layout() {
 
       {menuOpen && (
         <nav className="mobile-menu" aria-label="Mobile">
-          {LINKS.map((l) => (
+          {navLinks(user).map((l) => (
             <NavLink key={l.to} to={l.to} end={l.end} className="nav-link">
               {l.label === 'Video' || l.label === 'Board' || l.label === 'Card' ? `${l.label} games` : l.label}
             </NavLink>

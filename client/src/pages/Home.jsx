@@ -1,17 +1,6 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  ArrowRight,
-  BookBookmark,
-  ChatsCircle,
-  Clock,
-  ClockCounterClockwise,
-  GitCommit,
-  Play,
-  UserPlus,
-  UsersThree,
-  Wrench,
-} from '@phosphor-icons/react';
+import { ArrowRight, BookBookmark, Clock, UsersThree, Wrench } from '@phosphor-icons/react';
 import { useApi } from '../lib/api.js';
 import { useSession } from '../lib/auth.js';
 import { CATEGORIES, displayName, timeAgo } from '../lib/format.js';
@@ -20,20 +9,12 @@ import SearchBox from '../components/SearchBox.jsx';
 import GameCard, { GameGridSkeleton } from '../components/GameCard.jsx';
 import GameArt from '../components/GameArt.jsx';
 import Avatar from '../components/Avatar.jsx';
-import { isRecent } from '../components/Badges.jsx';
 import { Embers, PixelMatrix } from '../components/Effects.jsx';
-import { Empty, Spinner } from '../components/Common.jsx';
 
+// The public landing page. Signed-in users get their dashboard on their profile instead.
 export default function Home() {
-  const { data: session, isPending } = useSession();
-  if (isPending) {
-    return (
-      <div className="center-page">
-        <Spinner />
-      </div>
-    );
-  }
-  return session?.user ? <Feed user={session.user} /> : <Landing />;
+  const { data: session } = useSession();
+  return <Landing user={session?.user} />;
 }
 
 export function SectionHead({ index, kicker, title, link }) {
@@ -107,7 +88,7 @@ function Realms({ games, counts }) {
   );
 }
 
-function Landing() {
+function Landing({ user }) {
   const stats = useApi('/games/stats');
   const all = useApi('/games');
   const s = stats.data;
@@ -117,9 +98,12 @@ function Landing() {
   return (
     <>
       <section className="hero">
-        <CapsuleWall games={games} />
-        <div className="hero-shade" />
-        <Embers />
+        {/* Background layers are clipped here so the search suggestions can overflow the hero. */}
+        <div className="hero-bg">
+          <CapsuleWall games={games} />
+          <div className="hero-shade" />
+          <Embers />
+        </div>
         <div className="container hero-inner">
           <span className="eyebrow">
             <b>00</b> <i>/</i> Video · Board · Card games
@@ -212,18 +196,37 @@ function Landing() {
               <b>03</b> <i>/</i> Press start
             </span>
             <h2 className="display">Your library. Your party. Your notes.</h2>
-            <p className="text-2" style={{ maxWidth: 480, marginBottom: 28 }}>
-              Create a free account to track what you’re playing, get patch notes for your games on your home feed, and
-              join the discussion.
-            </p>
-            <div className="row wrap">
-              <Link to="/signup" className="btn btn-gold btn-lg">
-                Create account
-              </Link>
-              <Link to="/login" className="btn btn-lg btn-ghost">
-                Sign in
-              </Link>
-            </div>
+            {user ? (
+              <>
+                <p className="text-2" style={{ maxWidth: 480, marginBottom: 28 }}>
+                  Your profile has what you’re playing, patch notes for your games, your reviews and what your friends
+                  are up to.
+                </p>
+                <div className="row wrap">
+                  <Link to={`/u/${user.username}`} className="btn btn-gold btn-lg">
+                    Go to your profile
+                  </Link>
+                  <Link to="/video-games" className="btn btn-lg btn-ghost">
+                    Browse games
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-2" style={{ maxWidth: 480, marginBottom: 28 }}>
+                  Create a free account to track what you’re playing, get patch notes for your games on your profile,
+                  review games and join the discussion.
+                </p>
+                <div className="row wrap">
+                  <Link to="/signup" className="btn btn-gold btn-lg">
+                    Create account
+                  </Link>
+                  <Link to="/login" className="btn btn-lg btn-ghost">
+                    Sign in
+                  </Link>
+                </div>
+              </>
+            )}
           </div>
           <div className="matrix-wrap">
             <PixelMatrix />
@@ -266,6 +269,13 @@ export function ActivityText({ item, showActor = true }) {
           {actor}replied to <Link to={`/forums/${item.thread?.id}`}>{item.thread?.title}</Link>
         </>
       );
+    case 'review':
+      return (
+        <>
+          {actor}reviewed {game}
+          {item.meta?.score != null && <span className="score-inline">{item.meta.score}/10</span>}
+        </>
+      );
     case 'friend':
       return (
         <>
@@ -293,208 +303,3 @@ export function ActivityList({ items }) {
     </div>
   );
 }
-
-function Feed({ user }) {
-  const feed = useApi('/feed');
-  const f = feed.data;
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const backdrop = f?.nowPlaying.find((g) => g.hero_url)?.hero_url;
-
-  return (
-    <>
-      <section className="welcome">
-        {backdrop && (
-          <div className="backdrop-art" aria-hidden="true">
-            <img src={backdrop} alt="" />
-          </div>
-        )}
-        <div className="container welcome-inner">
-          <span className="eyebrow">
-            <b>00</b> <i>/</i> {greeting}
-          </span>
-          <h1 className="display">{user.name?.split(' ')[0] || user.username}</h1>
-          <div style={{ maxWidth: 640 }}>
-            <SearchBox size="lg" />
-          </div>
-          {f?.pendingRequests > 0 && (
-            <Link to="/community" className="callout callout-gold" style={{ marginTop: 20, maxWidth: 640 }}>
-              <UserPlus size={18} weight="bold" aria-hidden="true" />
-              You have {f.pendingRequests} pending friend request{f.pendingRequests > 1 ? 's' : ''}.
-            </Link>
-          )}
-        </div>
-      </section>
-
-      <div className="container page">
-        <div className="dashboard">
-          <div style={{ minWidth: 0 }}>
-            <section>
-              <SectionHead
-                index="01"
-                kicker="In progress"
-                title="Currently playing"
-                link={
-                  <Link to={`/u/${user.username}?tab=library`} className="section-link">
-                    Library <ArrowRight size={14} weight="bold" aria-hidden="true" />
-                  </Link>
-                }
-              />
-              {feed.loading ? (
-                <div className="skeleton" style={{ height: 300 }} />
-              ) : f?.nowPlaying.length ? (
-                <div className="capsule-row">
-                  {f.nowPlaying.map((g) => (
-                    <GameCard key={g.slug} game={g} status={g.status} />
-                  ))}
-                </div>
-              ) : (
-                <Empty icon={Play} title="Nothing in progress">
-                  Mark a game as Playing or Actively Playing and it shows up here.
-                </Empty>
-              )}
-            </section>
-
-            <section className="section" style={{ marginTop: 56 }}>
-              <SectionHead index="02" kicker="History" title="Recently visited" />
-              {feed.loading ? (
-                <div className="skeleton" style={{ height: 300 }} />
-              ) : f?.recentlyViewed.length ? (
-                <div className="capsule-row">
-                  {f.recentlyViewed.map((g) => (
-                    <GameCard key={g.slug} game={g} />
-                  ))}
-                </div>
-              ) : (
-                <Empty icon={ClockCounterClockwise} title="No history yet">
-                  Games you open appear here so you can jump back into their wiki.
-                </Empty>
-              )}
-            </section>
-
-            <section className="section" style={{ marginTop: 56 }}>
-              <SectionHead
-                index="03"
-                kicker="Your party"
-                title="Friend activity"
-                link={
-                  <Link to="/community" className="section-link">
-                    Find friends <ArrowRight size={14} weight="bold" aria-hidden="true" />
-                  </Link>
-                }
-              />
-              <div className="panel frame">
-                {feed.loading ? (
-                  <Spinner />
-                ) : f?.friendActivity.length ? (
-                  <ActivityList items={f.friendActivity} />
-                ) : (
-                  <Empty
-                    icon={UsersThree}
-                    title="It's quiet in here"
-                    action={
-                      <Link to="/community" className="btn btn-sm btn-gold">
-                        Search for friends
-                      </Link>
-                    }
-                  >
-                    Add friends to see what they’re playing and discussing.
-                  </Empty>
-                )}
-              </div>
-            </section>
-          </div>
-
-          <aside className="stack" style={{ gap: 20 }}>
-            <div className="panel">
-              <div className="panel-title">
-                <h2>
-                  <GitCommit size={16} weight="bold" aria-hidden="true" /> Patch notes for your games
-                </h2>
-              </div>
-              {f?.libraryUpdates.length ? (
-                f.libraryUpdates.map((u) => (
-                  <Link key={u.id} to={`/game/${u.slug}#patch-notes`} className="list-row">
-                    <GameArt game={{ ...u, title: u.game_title }} showTitle={false} />
-                    <div style={{ minWidth: 0 }}>
-                      <div className="small" style={{ fontWeight: 600 }}>
-                        {u.game_title}
-                      </div>
-                      <div className="xs text-2" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u.version ? `v${u.version} · ` : ''}
-                        {u.title}
-                      </div>
-                      <div className="activity-time">
-                        {isRecent(u.published_at) && <span className="gold">New · </span>}
-                        {timeAgo(u.published_at)}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <p className="small text-2">
-                  Add Steam video games to your library and their latest updates will appear here.
-                </p>
-              )}
-            </div>
-
-            <div className="panel">
-              <div className="panel-title">
-                <h2>
-                  <Play size={16} weight="bold" aria-hidden="true" /> Friends are playing
-                </h2>
-              </div>
-              {f?.friendsPlaying.length ? (
-                f.friendsPlaying.map((g) => (
-                  <Link key={g.slug} to={`/game/${g.slug}`} className="list-row">
-                    <GameArt game={g} showTitle={false} />
-                    <div style={{ minWidth: 0 }}>
-                      <div className="small" style={{ fontWeight: 600 }}>
-                        {g.title}
-                      </div>
-                      <div className="xs text-2">
-                        {g.players
-                          .slice(0, 2)
-                          .map((p) => displayName(p))
-                          .join(', ')}
-                        {g.players.length > 2 && ` +${g.players.length - 2}`}
-                      </div>
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <p className="small text-2">When friends start playing games, they’ll show up here.</p>
-              )}
-            </div>
-
-            <div className="panel">
-              <div className="panel-title">
-                <h2>
-                  <ChatsCircle size={16} weight="bold" aria-hidden="true" /> Latest discussions
-                </h2>
-              </div>
-              {f?.recentThreads.length ? (
-                f.recentThreads.map((t) => (
-                  <Link key={t.id} to={`/forums/${t.id}`} className="list-row" style={{ display: 'block' }}>
-                    <div className="small" style={{ fontWeight: 600 }}>
-                      {t.title}
-                    </div>
-                    <div className="activity-time">
-                      {t.game_title || 'General'} · {t.reply_count} replies · {timeAgo(t.last_post_at)}
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <p className="small text-2">No discussions yet. Start the first one.</p>
-              )}
-              <Link to="/forums/new" className="btn btn-sm btn-block" style={{ marginTop: 14 }}>
-                Start a discussion
-              </Link>
-            </div>
-          </aside>
-        </div>
-      </div>
-    </>
-  );
-}
-

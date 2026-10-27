@@ -7,7 +7,7 @@ const router = Router();
 
 // Shared activity projection: who did what, on which game/thread/friend.
 export const activitySelect = `
-  SELECT a.id, a.type, a.status, a.created_at,
+  SELECT a.id, a.type, a.status, a.meta, a.created_at,
     json_build_object('username', u.username, 'name', u.name, 'image', u.image) AS actor,
     CASE WHEN g.id IS NULL THEN NULL ELSE json_build_object(
       'id', g.id, 'slug', g.slug, 'title', g.title, 'category', g.category, 'hue', g.hue, 'capsule_url', g.capsule_url,

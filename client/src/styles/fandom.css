@@ -225,8 +225,8 @@
   color: var(--text-3);
 }
 .fandom-head {
-  margin-bottom: 32px;
-  padding-bottom: 24px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
   border-bottom: 1px solid var(--line);
 }
 .fandom-foot {
@@ -251,11 +251,50 @@
 .fandom-article [id] {
   scroll-margin-top: calc(var(--nav-h) + 24px);
 }
+@media (max-width: 1039px) {
+  /* Land below the sticky contents bar. */
+  .fandom-article [id] {
+    scroll-margin-top: calc(var(--nav-h) + 76px);
+  }
+}
+/* Headings flow beside the infobox instead of clearing it, so the article
+   doesn't leave a tall empty gap next to a long infobox. A new formatting
+   context keeps their divider line from running underneath the float. */
 .fandom-article h2,
 .fandom-article h3,
 .fandom-article .mw-heading2,
 .fandom-article .mw-heading3 {
-  clear: both;
+  display: flow-root;
+}
+.fandom-article.prose > * + * {
+  margin-top: 0.85em;
+}
+.fandom-article.prose h2 {
+  margin-top: 1.5em;
+  padding-top: 14px;
+}
+.fandom-article.prose .mw-heading2 {
+  margin-top: 1.5em;
+}
+.fandom-article.prose .mw-heading3 {
+  margin-top: 1.3em;
+}
+.fandom-article .mw-heading2 h2,
+.fandom-article .mw-heading3 h3 {
+  margin-top: 0;
+}
+.fandom-article.prose h3 {
+  margin-top: 1.3em;
+}
+.fandom-article.prose h2 + *,
+.fandom-article.prose h3 + *,
+.fandom-article.prose .mw-heading + * {
+  margin-top: 0.5em;
+}
+/* Empty paragraphs and spacer elements left over from wikitext. */
+.fandom-article p:empty,
+.fandom-article .mw-empty-elt {
+  display: none;
 }
 .fandom-article img {
   display: inline-block;
@@ -552,4 +591,82 @@
 .fandom-article .mobile-only,
 .fandom-article .mobile-show {
   display: none;
+}
+
+/* --- Mobile table of contents --- */
+.wiki-toc-mobile {
+  position: sticky;
+  top: calc(var(--nav-h) + 8px);
+  z-index: var(--z-pop);
+  margin-bottom: var(--s5);
+}
+@media (min-width: 1040px) {
+  .wiki-toc-mobile {
+    display: none;
+  }
+}
+.wiki-toc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  background: rgba(17, 17, 20, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2);
+  border-left: 2px solid var(--gold);
+  border-radius: var(--r);
+  color: var(--text);
+  text-align: left;
+}
+.wiki-toc-toggle > svg:first-child {
+  flex-shrink: 0;
+  color: var(--gold);
+}
+.wiki-toc-toggle .label {
+  flex-shrink: 0;
+}
+.wiki-toc-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  color: var(--text-2);
+}
+.wiki-toc-caret {
+  flex-shrink: 0;
+  transition: transform var(--fast);
+}
+.wiki-toc-mobile.open .wiki-toc-caret {
+  transform: rotate(180deg);
+}
+.wiki-toc-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  animation: pop var(--fast) var(--ease);
+}
+.wiki-toc-panel .wiki-nav-link {
+  padding-block: 10px;
+  font-size: 0.9rem;
+}
+.wiki-toc-panel .wiki-nav-link.sub {
+  padding-left: 26px;
+  font-size: 0.84rem;
+  color: var(--text-3);
+}
+.wiki-toc-panel .wiki-nav-link.active {
+  color: var(--text);
 }

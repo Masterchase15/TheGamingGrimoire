@@ -1,11 +1,88 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowSquareOut, BookOpenText, ListBullets, MagnifyingGlass } from '@phosphor-icons/react';
+import { ArrowLeft, ArrowSquareOut, BookOpenText, CaretDown, ListBullets, MagnifyingGlass } from '@phosphor-icons/react';
 import { useApi } from '../lib/api.js';
 import { CATEGORIES } from '../lib/format.js';
 import GameArt from '../components/GameArt.jsx';
 import { Crumbs, Empty, ErrorState, Spinner } from '../components/Common.jsx';
 import { Attribution, FandomMark, WikiSearch, wikiPath } from '../components/Fandom.jsx';
+
+const scrollToSection = (anchor) => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+// The heading currently at the top of the viewport, for highlighting the table of contents.
+function useCurrentSection(sections) {
+  const [current, setCurrent] = useState(null);
+  useEffect(() => {
+    if (!sections.length) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const offset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) + 90;
+      let found = null;
+      for (const s of sections) {
+        const el = document.getElementById(s.anchor);
+        if (el && el.getBoundingClientRect().top <= offset) found = s.anchor;
+      }
+      setCurrent(found);
+    };
+    const onScroll = () => frame || (frame = requestAnimationFrame(update));
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, [sections]);
+  return current;
+}
+
+// Below the desktop breakpoint the sidebar is hidden, so the contents become a sticky dropdown.
+function MobileToc({ sections, current }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const currentTitle = sections.find((s) => s.anchor === current)?.title;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => !ref.current?.contains(e.target) && setOpen(false);
+    const esc = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+
+  return (
+    <nav className={`wiki-toc-mobile ${open ? 'open' : ''}`} aria-label="Contents" ref={ref}>
+      <button type="button" className="wiki-toc-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <ListBullets size={16} weight="bold" aria-hidden="true" />
+        <span className="label">Contents</span>
+        <span className="wiki-toc-current">{currentTitle || `${sections.length} sections`}</span>
+        <CaretDown size={14} weight="bold" aria-hidden="true" className="wiki-toc-caret" />
+      </button>
+      {open && (
+        <div className="wiki-toc-panel">
+          {sections.map((s) => (
+            <a
+              key={s.anchor}
+              href={`#${s.anchor}`}
+              className={`wiki-nav-link ${s.level > 2 ? 'sub' : ''} ${s.anchor === current ? 'active' : ''}`}
+              onClick={(e) => {
+                e.preventDefault();
+                setOpen(false);
+                scrollToSection(s.anchor);
+              }}
+            >
+              {s.title}
+            </a>
+          ))}
+        </div>
+      )}
+    </nav>
+  );
+}
 
 export default function FandomArticle() {
   const { slug, '*': rawTitle } = useParams();
@@ -21,6 +98,8 @@ export default function FandomArticle() {
   const game = gameReq.data?.game;
   const fandom = fandomReq.data?.fandom;
   const article = pageReq.data?.article;
+  const sections = article?.sections ?? [];
+  const currentSection = useCurrentSection(sections);
 
   // Jump to #anchors once the article HTML is in the DOM.
   useEffect(() => {
@@ -65,7 +144,6 @@ export default function FandomArticle() {
 
   const cat = CATEGORIES[game.category];
   const sitename = fandom?.sitename || 'Fandom';
-  const sections = article?.sections ?? [];
 
   return (
     <div className="container page">
@@ -89,10 +167,10 @@ export default function FandomArticle() {
                 <a
                   key={s.anchor}
                   href={`#${s.anchor}`}
-                  className={`wiki-nav-link ${s.level > 2 ? 'sub' : ''}`}
+                  className={`wiki-nav-link ${s.level > 2 ? 'sub' : ''} ${s.anchor === currentSection ? 'active' : ''}`}
                   onClick={(e) => {
                     e.preventDefault();
-                    document.getElementById(s.anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    scrollToSection(s.anchor);
                   }}
                 >
                   {s.title}
@@ -174,6 +252,8 @@ export default function FandomArticle() {
                     </a>
                   </div>
                 </header>
+
+                {sections.length > 0 && <MobileToc sections={sections} current={currentSection} />}
 
                 {/* Article HTML is sanitized on the server (no scripts, styles or event handlers). */}
                 <div

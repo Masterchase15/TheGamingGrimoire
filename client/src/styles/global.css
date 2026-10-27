@@ -1241,12 +1241,19 @@ input[type='search']::-webkit-search-decoration {
 /* ---------- Landing hero ---------- */
 .hero {
   position: relative;
-  overflow: hidden;
+  z-index: 2;
   min-height: min(92vh, 880px);
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--line);
   isolation: isolate;
+}
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
 }
 .hero-wall {
   position: absolute;
@@ -1750,13 +1757,15 @@ input[type='search']::-webkit-search-decoration {
   font-weight: 500;
 }
 .stat-blocks {
+  container-type: inline-size;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--line);
   background: var(--panel);
 }
 .stat-block {
-  padding: var(--s4);
+  min-width: 0;
+  padding: var(--s4) var(--s3);
   border-right: 1px solid var(--line);
 }
 .stat-block:last-child {
@@ -1765,10 +1774,12 @@ input[type='search']::-webkit-search-decoration {
 .stat-block strong {
   display: block;
   font-family: var(--font-display);
-  font-stretch: 125%;
+  font-stretch: 112%;
   font-weight: 900;
-  font-size: clamp(1.4rem, 3vw, 2.1rem);
+  /* Sized to the table, not the viewport, so "109.5h" fits a narrow sidebar. */
+  font-size: clamp(1rem, 5.6cqi, 2rem);
   line-height: 1.1;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .stat-block span {
@@ -2374,12 +2385,6 @@ mark {
     grid-template-columns: minmax(0, 1fr) 360px;
   }
 }
-.welcome {
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  border-bottom: 1px solid var(--line);
-}
 .backdrop-art {
   position: absolute;
   inset: 0;
@@ -2392,7 +2397,6 @@ mark {
   object-position: center 25%;
   opacity: 0.42;
 }
-.welcome::after,
 .profile-hero::after {
   content: '';
   position: absolute;
@@ -2401,13 +2405,6 @@ mark {
   background:
     linear-gradient(90deg, var(--bg) 8%, rgba(9, 9, 11, 0.65) 60%, rgba(9, 9, 11, 0.35)),
     linear-gradient(180deg, transparent 40%, var(--bg));
-}
-.welcome-inner {
-  padding-block: var(--s8) var(--s7);
-}
-.welcome h1 {
-  font-size: clamp(2.2rem, 6vw, 4.8rem);
-  margin: var(--s4) 0 var(--s5);
 }
 .activity-item {
   display: flex;
@@ -2506,20 +2503,224 @@ mark {
 /* ---------- Profile ---------- */
 .profile-hero {
   position: relative;
-  overflow: hidden;
+  /* No overflow clipping (the backdrop is inset 0): the search suggestions must be able to hang below the hero. */
+  z-index: 2;
   isolation: isolate;
   border-bottom: 1px solid var(--line);
 }
+.profile-hero .backdrop-art {
+  overflow: hidden;
+}
 .profile-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  padding-block: var(--s8) var(--s6);
+}
+.profile-id {
   display: flex;
   gap: var(--s5);
   align-items: flex-end;
   flex-wrap: wrap;
-  padding-block: var(--s8) var(--s6);
 }
 .profile-name {
   margin: 8px 0 6px;
-  font-size: clamp(2rem, 5vw, 3.8rem);
+  font-size: clamp(2rem, 6vw, 4.8rem);
+  overflow-wrap: anywhere;
+}
+.profile-statbar {
+  display: flex;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  background: rgba(17, 17, 20, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  scrollbar-width: none;
+}
+.profile-stat {
+  position: relative;
+  flex: 1 0 auto;
+  min-width: 104px;
+  padding: 16px 18px 14px;
+  border-right: 1px solid var(--line);
+}
+.profile-stat:last-child {
+  border-right: 0;
+}
+.profile-stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18px;
+  width: 18px;
+  height: 2px;
+  background: var(--stat-c);
+}
+.profile-stat strong {
+  display: block;
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-weight: 900;
+  font-size: 1.7rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.profile-stat span {
+  display: block;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+.profile-search {
+  max-width: 640px;
+}
+@media (max-width: 720px) {
+  .profile-statbar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .profile-stat {
+    min-width: 0;
+    padding: 12px 10px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .profile-stat:nth-child(4n) {
+    border-right: 0;
+  }
+  .profile-stat:nth-last-child(-n + 4) {
+    border-bottom: 0;
+  }
+  .profile-stat::before {
+    left: 10px;
+  }
+  .profile-stat strong {
+    font-size: 1.35rem;
+  }
+  .profile-stat span {
+    white-space: normal;
+    font-size: 0.6rem;
+  }
+  .profile-id .avatar {
+    --size: 64px !important;
+  }
+}
+
+/* ---------- Reviews ---------- */
+.score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 4px 9px;
+  border: 1px solid var(--score-c);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--score-c) 12%, transparent);
+  color: var(--score-c);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.score strong {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-weight: 900;
+  font-size: 1.05rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.score span {
+  font-size: 0.66rem;
+  opacity: 0.75;
+}
+.score-lg {
+  padding: 10px 14px;
+}
+.score-lg strong {
+  font-size: 2.2rem;
+}
+.score-lg span {
+  font-size: 0.8rem;
+}
+.score-high {
+  --score-c: var(--gold);
+}
+.score-mid {
+  --score-c: #fbbf24;
+}
+.score-low {
+  --score-c: var(--ember);
+}
+.score-inline {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.review-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.review-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.review-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+}
+.review-card {
+  padding: var(--s4) var(--s5);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.review-list > .review-card:last-child {
+  border-bottom: 0;
+}
+.review-card.mine {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  box-shadow: inset 2px 0 0 var(--gold);
+}
+.review-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.review-body {
+  margin-top: 12px;
+  max-width: 72ch;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.review-body p + p {
+  margin-top: 0.8em;
+}
+.review-card-game {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: var(--s4);
+}
+.review-card-game .art {
+  border-radius: var(--r-sm);
+}
+.review-game-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.review-game-title:hover {
+  color: var(--gold);
 }
 .profile-stats {
   display: flex;

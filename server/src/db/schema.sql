@@ -151,3 +151,16 @@ CREATE TABLE IF NOT EXISTS fandom_cache (
   data        JSONB NOT NULL,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Game reviews: one per user per game, scored 1-10.
+CREATE TABLE IF NOT EXISTS reviews (
+  id          SERIAL PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES "user" (id) ON DELETE CASCADE,
+  game_id     INT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+  score       INT NOT NULL CHECK (score BETWEEN 1 AND 10),
+  body        TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS reviews_game_idx ON reviews (game_id, updated_at DESC);
