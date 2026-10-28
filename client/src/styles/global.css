@@ -1818,6 +1818,153 @@ input[type='search']::-webkit-search-decoration {
   font-stretch: 105%;
   line-height: 1.25;
 }
+
+/* Steam price + sale state */
+.chip-sale {
+  background: var(--ember);
+  border-color: var(--ember);
+  color: #1a0700;
+  font-weight: 700;
+}
+.chip-sale.chip-glass {
+  background: color-mix(in srgb, var(--ember) 85%, transparent);
+}
+.price-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s5);
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(90% 120% at 100% 0%, rgba(255, 210, 63, 0.08), transparent 60%),
+    var(--panel);
+}
+.price-card.on-sale {
+  border-color: color-mix(in srgb, var(--ember) 45%, transparent);
+  background:
+    radial-gradient(90% 120% at 100% 0%, var(--ember-soft), transparent 60%),
+    var(--panel);
+}
+.price-num {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-weight: 900;
+  font-size: clamp(2rem, 4.5vw, 2.8rem);
+  line-height: 1;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.price-num .price-was {
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-stretch: 100%;
+  color: var(--text-3);
+}
+.price {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--gold);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.price.muted {
+  font-weight: 500;
+  font-size: 0.74rem;
+  color: var(--text-3);
+}
+.price-was {
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+/* DLC and expansions */
+.addon-grid {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  padding: 1px;
+}
+.addon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--panel);
+  /* Hairline frame per card, so a half-empty last row has no grey filler. */
+  box-shadow: 0 0 0 1px var(--line);
+  transition: background var(--fast);
+}
+a.addon:hover {
+  background: var(--panel-2);
+}
+a.addon::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--gold);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform var(--med) var(--ease);
+}
+a.addon:hover::after {
+  transform: scaleY(1);
+}
+.addon-art {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-3);
+}
+.addon-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.addon-art.wide img {
+  object-fit: cover;
+}
+.addon-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--s4);
+}
+.addon-title {
+  font-size: 0.98rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.addon-desc {
+  font-size: 0.84rem;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.addon-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-top: auto;
+  padding-top: 8px;
+}
 .wiki-list {
   display: grid;
   gap: 1px;

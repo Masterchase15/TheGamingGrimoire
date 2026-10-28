@@ -11,7 +11,11 @@
     "dev": "node scripts/dev.mjs",
     "build": "npm run build -w client",
     "start": "npm run start -w server",
-    "seed": "npm run seed -w server"
+    "seed": "npm run seed -w server",
+    "add-vgame": "node scripts/add-vgame.mjs",
+    "add-bgame": "node scripts/add-bgame.mjs",
+    "add-cgame": "node scripts/add-cgame.mjs",
+    "make-admin": "node scripts/make-admin.mjs"
   },
   "engines": {
     "node": ">=20"

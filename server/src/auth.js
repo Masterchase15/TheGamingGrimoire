@@ -23,6 +23,8 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       bio: { type: 'string', required: false, input: true },
+      // 'admin' unlocks the admin API. Set with `npm run make-admin -- <username>`; users can't set it themselves.
+      role: { type: 'string', required: false, input: false, defaultValue: 'user' },
     },
   },
   plugins: [

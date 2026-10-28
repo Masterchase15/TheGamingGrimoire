@@ -164,3 +164,73 @@ CREATE TABLE IF NOT EXISTS reviews (
   UNIQUE (user_id, game_id)
 );
 CREATE INDEX IF NOT EXISTS reviews_game_idx ON reviews (game_id, updated_at DESC);
+
+-- Content pipeline: games added through the admin API are owned by the database
+-- ('api'); the startup seed sync only touches games it owns ('seed').
+ALTER TABLE games ADD COLUMN IF NOT EXISTS managed_by TEXT NOT NULL DEFAULT 'seed';
+DO $$ BEGIN
+  ALTER TABLE games ADD CONSTRAINT games_managed_by_check CHECK (managed_by IN ('seed', 'api'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Every change made through the admin API, for accountability.
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id          SERIAL PRIMARY KEY,
+  actor       TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  game_slug   TEXT,
+  details     JSONB NOT NULL DEFAULT '{}',
+  ip          TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_audit_log_created_idx ON admin_audit_log (created_at DESC);
+
+-- Steam store data for video games: the current price (refreshed every few hours,
+-- since Steam runs frequent sales) and the game's DLC.
+ALTER TABLE games ADD COLUMN IF NOT EXISTS price_currency TEXT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS price_initial INT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS price_final INT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS price_discount INT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS is_free BOOLEAN;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS store_checked_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS game_dlc (
+  id              SERIAL PRIMARY KEY,
+  game_id         INT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+  appid           INT NOT NULL,
+  name            TEXT NOT NULL,
+  kind            TEXT NOT NULL DEFAULT 'dlc',
+  description     TEXT,
+  header_url      TEXT,
+  release_date    TEXT,
+  released_on     DATE,
+  coming_soon     BOOLEAN NOT NULL DEFAULT false,
+  is_free         BOOLEAN NOT NULL DEFAULT false,
+  price_currency  TEXT,
+  price_initial   INT,
+  price_final     INT,
+  price_discount  INT,
+  checked_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (game_id, appid)
+);
+
+-- Board and card game expansions: synced from BoardGameGeek (source 'bgg') when the
+-- game has a bgg_id and BGG_API_TOKEN is set, or listed by hand in the game's JSON ('manual').
+ALTER TABLE games ADD COLUMN IF NOT EXISTS bgg_id INT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS bgg_checked_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS game_expansions (
+  id           SERIAL PRIMARY KEY,
+  game_id      INT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+  source       TEXT NOT NULL CHECK (source IN ('bgg', 'manual')),
+  bgg_id       INT,
+  name         TEXT NOT NULL,
+  year         INT,
+  description  TEXT,
+  image_url    TEXT,
+  url          TEXT,
+  popularity   INT NOT NULL DEFAULT 0,
+  sort_order   INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS game_expansions_game_idx ON game_expansions (game_id);
+CREATE UNIQUE INDEX IF NOT EXISTS game_expansions_bgg_idx ON game_expansions (game_id, bgg_id) WHERE source = 'bgg';

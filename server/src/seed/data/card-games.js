@@ -288,6 +288,7 @@ Betting options: **check, bet, call, raise, fold**.
   },
   {
     slug: 'uno',
+    bgg_id: 2223,
     steam_appid: 470220,
     title: 'UNO',
     category: 'card',

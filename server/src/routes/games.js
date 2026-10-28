@@ -1,17 +1,18 @@
 import { Router } from 'express';
 import { query } from '../db/pool.js';
-import { lookupHltb, hltbUrl } from '../lib/hltb.js';
+import { ensureHltb, hltbUrl } from '../lib/hltb.js';
 import { HttpError, requireUser } from '../lib/session.js';
 import { statusesFor } from '../lib/statuses.js';
+import { bggUrl } from '../lib/bgg.js';
 import { plainExcerpt, steamStoreUrl } from '../lib/steam.js';
-import { refreshGameNewsIfStale } from '../lib/steamSync.js';
+import { refreshGameNewsIfStale, refreshStoreIfStale } from '../lib/steamSync.js';
 import { getArticle, getOverview, searchWiki } from '../lib/fandom.js';
 
 const router = Router();
 
 const LIST_COLUMNS = `g.id, g.slug, g.title, g.category, g.tagline, g.genres, g.platforms, g.release_year,
   g.players, g.play_time, g.is_continuous, g.featured, g.hue, g.hltb_main,
-  g.capsule_url, g.header_url, g.current_version, g.last_update_at,
+  g.capsule_url, g.header_url, g.current_version, g.last_update_at, g.price_discount,
   (SELECT count(*)::int FROM wiki_sections s WHERE s.game_id = g.id) AS section_count,
   (SELECT count(*)::int FROM user_games ug WHERE ug.game_id = g.id) AS member_count`;
 
@@ -63,31 +64,6 @@ router.get('/stats', async (_req, res) => {
   res.json({ counts, pages: pages.count, terms: terms.count });
 });
 
-const HLTB_FRESH_DAYS = 14;
-const HLTB_RETRY_DAYS = 1;
-
-// Look up completion times for finite video games, refreshing stale cache entries.
-async function ensureHltb(game) {
-  if (game.category !== 'video' || game.is_continuous) return game;
-  const checked = game.hltb_checked_at ? new Date(game.hltb_checked_at).getTime() : 0;
-  const maxAgeDays = game.hltb_id ? HLTB_FRESH_DAYS : HLTB_RETRY_DAYS;
-  if (Date.now() - checked < maxAgeDays * 86400000) return game;
-  try {
-    const hit = await lookupHltb(game.hltb_query || game.title, game.release_year);
-    const { rows } = await query(
-      `UPDATE games SET hltb_id = $2, hltb_name = $3, hltb_main = $4, hltb_extra = $5, hltb_complete = $6,
-         hltb_checked_at = now() WHERE id = $1 RETURNING *`,
-      [game.id, hit?.id ?? null, hit?.name ?? null, hit?.main ?? null, hit?.extra ?? null, hit?.complete ?? null]
-    );
-    return rows[0];
-  } catch (err) {
-    console.warn(`[hltb] lookup failed for "${game.title}": ${err.message}`);
-    // Keep any older cached values; try again tomorrow.
-    await query(`UPDATE games SET hltb_checked_at = now() - interval '${HLTB_FRESH_DAYS - HLTB_RETRY_DAYS} days' WHERE id = $1`, [game.id]);
-    return game;
-  }
-}
-
 function hltbPayload(game) {
   if (game.category !== 'video' || game.is_continuous) return null;
   if (!game.hltb_id) return { found: false };
@@ -102,14 +78,34 @@ function hltbPayload(game) {
   };
 }
 
+const priceOf = (r) => ({
+  currency: r.price_currency,
+  initial: r.price_initial,
+  final: r.price_final,
+  discount: r.price_discount ?? 0,
+});
+
+const dlcPayload = ({ price_currency, price_initial, price_final, price_discount, ...d }) => ({
+  ...d,
+  price: price_final != null ? priceOf({ price_currency, price_initial, price_final, price_discount }) : null,
+  url: steamStoreUrl(d.appid),
+});
+
+// A hand-listed expansion that is also on BoardGameGeek replaces the synced copy.
+function uniqueExpansions(rows) {
+  const listed = new Set(rows.filter((r) => r.source === 'manual' && r.bgg_id).map((r) => r.bgg_id));
+  return rows.filter((r) => r.source === 'manual' || !listed.has(r.bgg_id));
+}
+
 router.get('/:slug', async (req, res) => {
   const { rows } = await query(`SELECT * FROM games WHERE slug = $1`, [req.params.slug]);
   if (!rows[0]) throw new HttpError(404, 'Game not found.');
   const game = await ensureHltb(rows[0]);
 
   refreshGameNewsIfStale(game);
+  refreshStoreIfStale(game);
 
-  const [sections, statusCounts, entry, threads, updates, reviews] = await Promise.all([
+  const [sections, statusCounts, entry, threads, updates, reviews, addons] = await Promise.all([
     query(
       `SELECT s.slug, s.title, s.icon, s.summary,
         (SELECT count(*)::int FROM glossary_terms t WHERE t.section_id = s.id) AS term_count
@@ -129,6 +125,20 @@ router.get('/:slug', async (req, res) => {
         )
       : { rows: [] },
     query(`SELECT count(*)::int AS count, round(avg(score)::numeric, 1)::float AS average FROM reviews WHERE game_id = $1`, [game.id]),
+    game.category === 'video'
+      ? query(
+          `SELECT appid, name, kind, description, header_url, release_date, released_on, coming_soon, is_free,
+             price_currency, price_initial, price_final, price_discount
+           FROM game_dlc WHERE game_id = $1
+           ORDER BY coming_soon DESC, released_on DESC NULLS LAST, name`,
+          [game.id]
+        )
+      : query(
+          // Hand-listed expansions first, in their listed order, then BoardGameGeek's most popular.
+          `SELECT source, bgg_id, name, year, description, image_url, url FROM game_expansions
+           WHERE game_id = $1 ORDER BY source = 'bgg', sort_order`,
+          [game.id]
+        ),
   ]);
 
   if (req.user) {
@@ -141,7 +151,8 @@ router.get('/:slug', async (req, res) => {
 
   const {
     hltb_query, hltb_id, hltb_name, hltb_main, hltb_extra, hltb_complete, hltb_checked_at,
-    steam_assets_checked_at, news_checked_at, fandom_topics, fandom_page, patch_exclude, ...publicGame
+    steam_assets_checked_at, news_checked_at, fandom_topics, fandom_page, patch_exclude, store_checked_at, bgg_checked_at,
+    price_currency, price_initial, price_final, price_discount, is_free, ...publicGame
   } = game;
   // The Fandom article "Read the wiki" opens; defaults to the game's own title on its wiki.
   const fandomPage = game.fandom_wiki ? fandom_page || game.title : null;
@@ -163,6 +174,17 @@ router.get('/:slug', async (req, res) => {
         }
       : null,
     updates: updates.rows.map((u) => ({ ...u, excerpt: plainExcerpt(u.excerpt) })),
+    store:
+      game.category === 'video' && game.steam_appid && game.store_checked_at
+        ? {
+            isFree: Boolean(is_free),
+            price: price_final != null ? priceOf(game) : null,
+            checkedAt: store_checked_at,
+          }
+        : null,
+    dlc: game.category === 'video' ? addons.rows.map(dlcPayload) : null,
+    expansions: game.category !== 'video' ? uniqueExpansions(addons.rows) : null,
+    bgg: game.bgg_id ? { id: game.bgg_id, url: bggUrl(game.bgg_id) } : null,
     entry: entry.rows[0] ?? null,
   });
 });

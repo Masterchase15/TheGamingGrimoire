@@ -19,6 +19,11 @@ export default function GameCard({ game, status, style, eager }) {
         <div className="capsule-badges">
           {status ? <StatusBadge status={status} /> : <CategoryChip category={game.category} glass />}
           {isRecent(game.last_update_at) && <span className="chip chip-solid">Updated</span>}
+          {game.price_discount > 0 && (
+            <span className="chip chip-sale" title="On sale on Steam">
+              −{game.price_discount}%
+            </span>
+          )}
         </div>
         <div className="capsule-foot">
           {game.is_continuous && <LiveChip glass />}

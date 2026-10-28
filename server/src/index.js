@@ -6,6 +6,7 @@ import { auth } from './auth.js';
 import { migrate } from './db/migrate.js';
 import { seed } from './seed/seed.js';
 import { startSteamSync } from './lib/steamSync.js';
+import { startBggSync } from './lib/bggSync.js';
 import { PORT, ROOT_DIR, isProd } from './lib/env.js';
 import { loadSession } from './lib/session.js';
 import gamesRouter from './routes/games.js';
@@ -15,6 +16,7 @@ import usersRouter from './routes/users.js';
 import friendsRouter from './routes/friends.js';
 import feedRouter from './routes/feed.js';
 import forumsRouter from './routes/forums.js';
+import adminRouter from './routes/admin.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -22,6 +24,9 @@ app.disable('x-powered-by');
 
 // Better Auth must see the raw body, so it is mounted before express.json().
 app.all('/api/auth/*splat', toNodeHandler(auth));
+
+// Admin requests can carry a whole game's wiki content, so they get a larger body limit.
+app.use('/api/admin', express.json({ limit: '2mb' }), loadSession, adminRouter);
 
 app.use(express.json({ limit: '100kb' }));
 app.use('/api', loadSession);
@@ -51,4 +56,5 @@ app.use((err, _req, res, _next) => {
 await migrate();
 await seed();
 startSteamSync();
+startBggSync();
 app.listen(PORT, () => console.log(`TheGamingGrimoire API listening on http://localhost:${PORT}`));

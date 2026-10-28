@@ -2,6 +2,8 @@
 // endpoint the howlongtobeat.com site uses: fetch a short-lived token from
 // /api/search/site/init, then POST the search with that token. Results are
 // cached on the games table so each game is looked up rarely.
+import { query } from '../db/pool.js';
+
 const BASE = 'https://howlongtobeat.com';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
@@ -91,3 +93,28 @@ export async function lookupHltb(title, year) {
 }
 
 export const hltbUrl = (id) => `${BASE}/game/${id}`;
+
+const HLTB_FRESH_DAYS = 14;
+const HLTB_RETRY_DAYS = 1;
+
+// Look up completion times for finite video games, refreshing stale cache entries.
+export async function ensureHltb(game) {
+  if (game.category !== 'video' || game.is_continuous) return game;
+  const checked = game.hltb_checked_at ? new Date(game.hltb_checked_at).getTime() : 0;
+  const maxAgeDays = game.hltb_id ? HLTB_FRESH_DAYS : HLTB_RETRY_DAYS;
+  if (Date.now() - checked < maxAgeDays * 86400000) return game;
+  try {
+    const hit = await lookupHltb(game.hltb_query || game.title, game.release_year);
+    const { rows } = await query(
+      `UPDATE games SET hltb_id = $2, hltb_name = $3, hltb_main = $4, hltb_extra = $5, hltb_complete = $6,
+         hltb_checked_at = now() WHERE id = $1 RETURNING *`,
+      [game.id, hit?.id ?? null, hit?.name ?? null, hit?.main ?? null, hit?.extra ?? null, hit?.complete ?? null]
+    );
+    return rows[0];
+  } catch (err) {
+    console.warn(`[hltb] lookup failed for "${game.title}": ${err.message}`);
+    // Keep any older cached values; try again tomorrow.
+    await query(`UPDATE games SET hltb_checked_at = now() - interval '${HLTB_FRESH_DAYS - HLTB_RETRY_DAYS} days' WHERE id = $1`, [game.id]);
+    return game;
+  }
+}

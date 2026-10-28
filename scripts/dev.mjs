@@ -1,5 +1,5 @@
 // Local development runner used by start.bat / `npm run dev`.
-// 1. Creates .env on first run (random auth secret, local database URL).
+// 1. Creates .env on first run (random auth secret, admin API key, local database URL).
 // 2. Starts the bundled local PostgreSQL unless DATABASE_URL points elsewhere.
 // 3. Runs the API (auto-restarts on change) and the Vite dev server together.
 import crypto from 'node:crypto';
@@ -30,6 +30,13 @@ if (!fs.existsSync(envPath)) {
     ].join('\n')
   );
   console.log('Created .env with local defaults.');
+}
+
+// The admin API key lets the add-vgame / add-bgame / add-cgame scripts add games. Older .env files predate it.
+if (!/^ADMIN_API_KEY=./m.test(fs.readFileSync(envPath, 'utf8'))) {
+  const key = crypto.randomBytes(32).toString('hex');
+  fs.appendFileSync(envPath, `\n# Admin API key for adding games (npm run add-vgame / add-bgame / add-cgame). Server-side only, never commit.\nADMIN_API_KEY=${key}\n`);
+  console.log('Added an ADMIN_API_KEY to .env.');
 }
 
 // Re-read after possibly creating it (env.js already ran dotenv on import).

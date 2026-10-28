@@ -133,3 +133,54 @@ export function plainExcerpt(md = '', max = 260) {
 }
 
 export const steamStoreUrl = (appid) => `https://store.steampowered.com/app/${appid}`;
+
+// ---------- Store API (prices and DLC; no key needed) ----------
+const STORE = 'https://store.steampowered.com/api/appdetails';
+// Prices are shown in this store region's currency.
+const COUNTRY = (process.env.STEAM_COUNTRY || 'us').toLowerCase();
+
+const decodeEntities = (s) =>
+  s.replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+
+const priceOf = (p) =>
+  p ? { currency: p.currency, initial: p.initial, final: p.final, discount: p.discount_percent } : null;
+
+/** "Oct 8, 2026" → "2026-10-08" (null when Steam gives something vaguer, like "Q4 2026"). */
+function parseReleaseDate(text) {
+  if (!text || !/\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}/.test(text)) return null;
+  const d = new Date(`${text} UTC`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+/** Store details for one app: name, type, price, release date and its DLC app ids. Null if Steam has no page for it. */
+export async function fetchStoreApp(appid) {
+  const json = await getJson(`${STORE}?appids=${appid}&cc=${COUNTRY}&l=english`);
+  const d = json?.[appid]?.success ? json[appid].data : null;
+  if (!d) return null;
+  return {
+    appid,
+    name: d.name,
+    type: d.type,
+    description: d.short_description ? decodeEntities(d.short_description).trim() : null,
+    header: d.header_image ?? null,
+    isFree: Boolean(d.is_free),
+    price: priceOf(d.price_overview),
+    releaseDate: d.release_date?.date || null,
+    releasedOn: parseReleaseDate(d.release_date?.date),
+    comingSoon: Boolean(d.release_date?.coming_soon),
+    dlc: d.dlc ?? [],
+  };
+}
+
+/** Current prices for many apps in one request (Steam allows several ids only for price data). Map of appid → price or null. */
+export async function fetchStorePrices(appids) {
+  const out = new Map();
+  if (!appids.length) return out;
+  const json = await getJson(`${STORE}?appids=${appids.join(',')}&cc=${COUNTRY}&filters=price_overview`);
+  for (const id of appids) {
+    const r = json?.[id];
+    // An unsuccessful entry means the app left the store; an empty list means it has no price (free).
+    if (r?.success) out.set(id, priceOf(Array.isArray(r.data) ? null : r.data?.price_overview));
+  }
+  return out;
+}
