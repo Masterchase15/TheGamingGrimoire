@@ -10,6 +10,8 @@ A wiki and community site for **video games, board games and card games**.
 - **HowLongToBeat:** finite video games show main / main+extras / completionist times, cached in the database.
 - **Fandom wikis:** each game's Wiki section pulls from its Fandom community via the MediaWiki API: an overview, featured pages, wiki search, and full articles rendered in-site (links stay inside the grimoire). Content is cached and attributed under CC BY-SA 3.0. Mappings live in `server/src/seed/data/fandom.js`.
 - **Steam integration:** library capsule art and hero banners for every game available on Steam, plus patch notes and the current version for video games. The server re-checks Steam every 30 minutes (and when a stale game page is opened), so new updates show up automatically.
+- **Prices and DLC:** every video game on Steam shows its current price (with sale discounts) and a DLC section, from Steam's public store API (no key needed). Prices are re-checked every 3 hours, so sales appear on their own.
+- **Expansions:** board and card games show an Expansions section, synced from BoardGameGeek for games with a `bgg_id` (needs `BGG_API_TOKEN` on the server), plus any expansions listed by hand in the game's JSON.
 - **Community:** user search, friend requests, a personal home feed (currently playing, recently visited, friend activity) and forums per game.
 
 ## Tech stack
@@ -28,10 +30,16 @@ server/src/
   index.js         Express app: Better Auth, API routes, serves client/dist in production
   auth.js          Better Auth config
   db/              Pool, schema.sql, migrations, bundled local Postgres
-  routes/          games, search, library, users, friends, feed, forums
+  routes/          games, search, library, users, friends, feed, forums, admin
   lib/hltb.js      HowLongToBeat client
+  lib/admin.js     Admin access (API key or admin role)
+  lib/gameStore.js Game upserts shared by the seed sync and the admin API
   seed/data/       Wiki content (games, sections, glossary terms)
 scripts/dev.mjs    Local runner used by start.bat
+scripts/add-?game.mjs  add-vgame / add-bgame / add-cgame: look up a game and send it to the admin API
+scripts/lib/add-game.mjs  Shared core of those three scripts
+scripts/make-admin.mjs Give an account the admin role
+game-drafts/       Game JSON drafts written by the add scripts
 start.bat          One-click local start on Windows
 ```
 
@@ -51,6 +59,50 @@ To use your own Postgres instead of the bundled one, set `DATABASE_URL` in `.env
 
 Wiki content lives in `server/src/seed/data/`. Each game has metadata plus `sections` (Markdown `content`, optional glossary `terms`). On startup the server syncs any changes into the database automatically. Set `is_continuous: true` for games that are played continuously, and `hltb_query` when the HowLongToBeat title differs.
 
+Games added or edited through the admin API (below) are owned by the database from then on, and the seed sync leaves them alone. To hand one back to the seed files, run `npm run add-vgame -- --release <slug>` (any of the three add scripts works).
+
+## Adding games (admin API)
+
+New games can be added without editing code or redeploying. A local script looks the game up, saves a JSON draft, and sends it to a protected endpoint that validates it and upserts it into the database.
+
+```
+npm run add-vgame -- "Hades II"                         # video game
+npm run add-bgame -- "Spirit Island"                    # board game
+npm run add-cgame -- "Star Wars: Unlimited"             # card game
+npm run add-vgame -- --file game-drafts/hades-ii.json   # send a draft you edited
+npm run add-vgame -- --pull elden-ring                  # download a game on the site as a draft
+npm run add-vgame -- --refresh hades-ii                 # re-fetch Steam / HLTB / Fandom data now
+```
+
+All three scripts take the same commands and options and work the same way. Each one only calls the services for its category:
+
+| Script | Looks up | The site then fetches |
+|---|---|---|
+| `add-vgame` | Steam (app id, developer, publisher, year, genres), Fandom | Steam artwork, patch notes, price and DLC, HowLongToBeat times, Fandom overview |
+| `add-bgame` | BoardGameGeek (`bgg_id`, players, play time, age, designers; needs `BGG_API_TOKEN`), Fandom | BoardGameGeek expansions, Fandom overview; Steam artwork only if you set `steam_appid` |
+| `add-cgame` | BoardGameGeek (same details as board games; needs `BGG_API_TOKEN`), Fandom | BoardGameGeek expansions, Fandom overview; Steam artwork only if you set `steam_appid` |
+
+A draft remembers its category, so sending a board game draft with `add-vgame` (or the other way round) stops with a message naming the right script.
+
+1. **Lookup.** The script runs its category's lookups (table above) and writes `game-drafts/<slug>.json`. Edits you make to a draft are kept on later runs.
+2. **Preview.** It shows the game, what to check, and the server's validation result (`?dryRun=1`), then asks before sending. Use `--dry-run` to stop here, `--yes` to skip the question.
+3. **Save.** `POST /api/admin/games` validates the JSON and upserts it by slug. Omitted fields keep their stored values; `sections`, when sent, replaces the wiki sections.
+4. **Enrichment.** Right after saving, the server fetches Steam artwork, patch notes, price and DLC, BoardGameGeek expansions, HowLongToBeat times and the Fandom overview, and the script prints what it found.
+
+**Expansions not on BoardGameGeek** can be listed by hand in a board or card game's draft. Only `name` is required; sending `expansions` replaces the hand-listed ones (BoardGameGeek's stay):
+
+```json
+"expansions": [
+  { "name": "Seafarers", "year": 1997, "description": "Sail to new islands.", "image": "https://...", "url": "https://..." }
+]
+```
+
+Required per category: video games need `steam_appid` (or `null` if not on Steam); board games need `players`, `play_time` and `age`; card games need `players`. Missing tagline, description, Fandom wiki or sections produce warnings, not errors. Write taglines, descriptions and wiki sections in your own words.
+
+**Access.** Every `/api/admin` route needs either `Authorization: Bearer <ADMIN_API_KEY>` (scripts) or a signed-in account with the admin role (`npm run make-admin -- <username>`; `--revoke` to remove). The key must be at least 32 characters; `start.bat` generates one in `.env`. After 10 failed attempts an IP is locked out for 15 minutes. Every change is recorded in the `admin_audit_log` table.
+
+To add games to the live site, set `ADMIN_API_KEY` on Railway, then run the script with `--api https://your-app.up.railway.app` and the same key in your local environment.
+
 ## Deploy to Railway
 
 1. Push this repo to GitHub.
@@ -62,6 +114,8 @@ Wiki content lives in `server/src/seed/data/`. Each game has metadata plus `sect
    - `BETTER_AUTH_URL` and `CLIENT_URL` = your public URL, e.g. `https://thegaminggrimoire.up.railway.app`
    - `NODE_ENV` = `production`
    - `STEAM_API_KEY` = your Steam Web API key
+   - `ADMIN_API_KEY` = a long random string, if you want to add games with the add scripts (optional)
+   - `BGG_API_TOKEN` = your BoardGameGeek API token, to sync board and card game expansions (optional)
 5. Under **Settings → Networking**, generate a domain (use it for the URLs above).
 
 `railway.json` builds the client (`npm run build`) and starts the server (`npm start`), which runs migrations and syncs wiki content on boot. Health check: `/api/health`.

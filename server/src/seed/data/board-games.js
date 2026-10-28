@@ -4,6 +4,7 @@
 export default [
   {
     slug: 'catan',
+    bgg_id: 13,
     steam_appid: 544730,
     title: 'Catan',
     category: 'board',
@@ -72,6 +73,7 @@ First to **10 victory points** on their turn wins.
   },
   {
     slug: 'ticket-to-ride',
+    bgg_id: 9209,
     steam_appid: 2477010,
     title: 'Ticket to Ride',
     category: 'board',
@@ -117,6 +119,7 @@ Completed tickets add their value; incomplete ones subtract it. The **longest co
   },
   {
     slug: 'pandemic',
+    bgg_id: 30549,
     title: 'Pandemic',
     category: 'board',
     tagline: 'Work together to cure four diseases before they spread.',
@@ -160,6 +163,7 @@ If a city would get a 4th cube of a color, it **outbreaks** — spreading a cube
   },
   {
     slug: 'wingspan',
+    bgg_id: 266192,
     steam_appid: 1054490,
     title: 'Wingspan',
     category: 'board',
@@ -199,6 +203,7 @@ Points for birds, bonus cards, end-of-round goals, eggs, cached food and tucked 
   },
   {
     slug: 'gloomhaven',
+    bgg_id: 174430,
     steam_appid: 780290,
     title: 'Gloomhaven',
     category: 'board',
@@ -294,6 +299,7 @@ Your hand is your stamina. When you can't play two cards (or rest), you're **exh
   },
   {
     slug: 'azul',
+    bgg_id: 230802,
     title: 'Azul',
     category: 'board',
     tagline: 'Draft beautiful tiles to decorate the royal palace.',
@@ -326,6 +332,7 @@ Your hand is your stamina. When you can't play two cards (or rest), you're **exh
   },
   {
     slug: 'codenames',
+    bgg_id: 178900,
     steam_appid: 884670,
     title: 'Codenames',
     category: 'board',
@@ -359,6 +366,7 @@ Your hand is your stamina. When you can't play two cards (or rest), you're **exh
   },
   {
     slug: 'terraforming-mars',
+    bgg_id: 167791,
     steam_appid: 800270,
     title: 'Terraforming Mars',
     category: 'board',

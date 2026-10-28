@@ -45,3 +45,13 @@ export function hueFor(text = '') {
 }
 
 export const displayName = (u) => u?.name || u?.display_username || u?.username || 'Someone';
+
+// Steam prices arrive in cents with an ISO currency code.
+export function money(cents, currency = 'USD') {
+  if (cents == null) return null;
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency}`;
+  }
+}

@@ -11,13 +11,15 @@ import {
   Info,
   NotePencil,
   Plus,
+  PuzzlePiece,
   Star,
   SteamLogo,
+  Tag,
   Users,
 } from '@phosphor-icons/react';
 import { api, useApi } from '../lib/api.js';
 import { useSession } from '../lib/auth.js';
-import { CATEGORIES, hours, timeAgo } from '../lib/format.js';
+import { CATEGORIES, hours, money, timeAgo } from '../lib/format.js';
 import { STATUS } from '../lib/statuses.js';
 import GameArt from '../components/GameArt.jsx';
 import LibraryEditor from '../components/LibraryEditor.jsx';
@@ -63,8 +65,9 @@ export default function Game() {
     );
   }
 
-  const { game, sections, hltb, stats, entry, threadCount, steam, updates } = data;
+  const { game, sections, hltb, stats, entry, threadCount, steam, updates, store, dlc, expansions, bgg } = data;
   const reviews = reviewSummary ?? data.reviews;
+  const onSale = store?.price?.discount > 0;
   // "Read the wiki" opens the game's Fandom article; games without one fall back to the first quick guide.
   const wikiLink = game.fandom_page ? wikiPath(game.slug, game.fandom_page) : sections[0] && `/game/${game.slug}/${sections[0].slug}`;
   const cat = CATEGORIES[game.category];
@@ -90,10 +93,14 @@ export default function Game() {
   const subnav = [
     ['overview', 'Overview'],
     showPatches && ['patch-notes', 'Patch notes', updates.length],
+    dlc && ['dlc', 'DLC', dlc.length],
+    expansions && ['expansions', 'Expansions', expansions.length],
     ['wiki', 'Wiki', fandom ? fandom.topics.length + sections.length : sections.length],
     ['reviews', 'Reviews', reviews.count],
     ['discussions', 'Discussions', threadCount],
   ].filter(Boolean);
+  // Section numbers follow whichever sections this game shows.
+  const sectionIndex = (id) => String(subnav.findIndex(([s]) => s === id) + 1).padStart(2, '0');
 
   return (
     <>
@@ -117,6 +124,11 @@ export default function Game() {
               <CategoryChip category={game.category} glass />
               {game.is_continuous && <LiveChip glass />}
               {game.current_version && <span className="chip chip-gold chip-glass">v{game.current_version}</span>}
+              {onSale && (
+                <a href={steam.storeUrl} target="_blank" rel="noreferrer noopener" className="chip chip-sale chip-glass" title="On sale on Steam">
+                  <Tag size={12} weight="bold" aria-hidden="true" /> −{store.price.discount}% · {money(store.price.final, store.price.currency)}
+                </a>
+              )}
               {entry && <StatusBadge status={entry.status} />}
               {reviews.count > 0 && (
                 <a href="#reviews" className="chip chip-glass" title="Grimoire score">
@@ -147,6 +159,11 @@ export default function Game() {
                   <SteamLogo size={18} weight="bold" aria-hidden="true" /> Steam
                 </a>
               )}
+              {bgg && (
+                <a className="btn btn-ghost" href={bgg.url} target="_blank" rel="noreferrer noopener">
+                  <ArrowSquareOut size={18} weight="bold" aria-hidden="true" /> BoardGameGeek
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -167,7 +184,7 @@ export default function Game() {
         <div className="game-layout">
           <div style={{ minWidth: 0 }}>
             <section id="overview">
-              <SectionHead index="01" kicker="Overview" title="About the game" />
+              <SectionHead index={sectionIndex('overview')} kicker="Overview" title="About the game" />
               {game.description && <p className="game-desc">{game.description}</p>}
               {totalMembers > 0 && (
                 <div style={{ marginTop: 32 }}>
@@ -197,7 +214,7 @@ export default function Game() {
             {showPatches && (
               <section id="patch-notes" className="section">
                 <SectionHead
-                  index="02"
+                  index={sectionIndex('patch-notes')}
                   kicker="Updates"
                   title="Patch notes"
                   link={
@@ -208,9 +225,39 @@ export default function Game() {
               </section>
             )}
 
+            {dlc && (
+              <section id="dlc" className="section">
+                <SectionHead
+                  index={sectionIndex('dlc')}
+                  kicker="Add-ons"
+                  title="DLC"
+                  link={store?.checkedAt && <span className="label">Prices checked {timeAgo(store.checkedAt)}</span>}
+                />
+                <DlcList dlc={dlc} steam={steam} />
+              </section>
+            )}
+
+            {expansions && (
+              <section id="expansions" className="section">
+                <SectionHead
+                  index={sectionIndex('expansions')}
+                  kicker="Add-ons"
+                  title="Expansions"
+                  link={
+                    bgg && (
+                      <a className="link-btn muted" href={bgg.url} target="_blank" rel="noreferrer noopener">
+                        BoardGameGeek <ArrowSquareOut size={12} aria-hidden="true" />
+                      </a>
+                    )
+                  }
+                />
+                <ExpansionList expansions={expansions} title={game.title} />
+              </section>
+            )}
+
             <section id="wiki" className="section">
               <SectionHead
-                index={showPatches ? '03' : '02'}
+                index={sectionIndex('wiki')}
                 kicker="Grimoire"
                 title="Wiki"
                 link={fandom && <FandomMark sitename={fandom.sitename} />}
@@ -247,7 +294,7 @@ export default function Game() {
 
             <section id="reviews" className="section">
               <SectionHead
-                index={showPatches ? '04' : '03'}
+                index={sectionIndex('reviews')}
                 kicker="Verdicts"
                 title="Reviews"
               />
@@ -256,7 +303,7 @@ export default function Game() {
 
             <section id="discussions" className="section">
               <SectionHead
-                index={showPatches ? '05' : '04'}
+                index={sectionIndex('discussions')}
                 kicker="Community"
                 title="Discussions"
                 link={
@@ -270,6 +317,7 @@ export default function Game() {
           </div>
 
           <aside className="game-aside">
+            {store && <PriceCard store={store} steam={steam} />}
             {showPatches && steam && <VersionCard steam={steam} latest={updates[0]} />}
 
             {hltb && (
@@ -334,6 +382,140 @@ export default function Game() {
             reload();
           }}
         />
+      )}
+    </>
+  );
+}
+
+const shortDate = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+function Price({ price, isFree, big }) {
+  if (isFree) return <span className={big ? 'price-num' : 'price'}>Free</span>;
+  if (!price) return <span className="price muted">No price listed</span>;
+  return (
+    <span className={big ? 'price-num' : 'price'}>
+      {price.discount > 0 && <s className="price-was">{money(price.initial, price.currency)}</s>}
+      {money(price.final, price.currency)}
+    </span>
+  );
+}
+
+function PriceCard({ store, steam }) {
+  const sale = store.price?.discount > 0;
+  return (
+    <div className={`price-card ${sale ? 'on-sale' : ''}`}>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <span className="label">
+          <Tag size={12} weight="bold" style={{ display: 'inline', marginRight: 6 }} aria-hidden="true" />
+          {sale ? 'On sale' : 'Price on Steam'}
+        </span>
+        {sale && <span className="chip chip-sale">−{store.price.discount}%</span>}
+      </div>
+      <Price price={store.price} isFree={store.isFree} big />
+      {!store.isFree && !store.price && <p className="small text-2">Steam doesn’t list a price for this game right now.</p>}
+      <div className="row" style={{ justifyContent: 'space-between', gap: 12 }}>
+        <span className="xs text-3">Checked {timeAgo(store.checkedAt)}. Steam sales are re-checked every few hours.</span>
+        <a className="link-btn muted" href={steam.storeUrl} target="_blank" rel="noreferrer noopener" style={{ flexShrink: 0 }}>
+          Store <ArrowSquareOut size={12} aria-hidden="true" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+const DLC_KINDS = { music: 'Soundtrack', video: 'Video', dlc: null };
+const ADDONS_SHOWN = 6;
+
+function DlcList({ dlc, steam }) {
+  const [all, setAll] = useState(false);
+  if (!steam) {
+    return (
+      <Empty icon={PuzzlePiece} title="Not on Steam">
+        This game isn’t sold on Steam, so its DLC can’t be synced automatically.
+      </Empty>
+    );
+  }
+  if (!dlc.length) {
+    return (
+      <Empty icon={PuzzlePiece} title="No DLC">
+        Steam doesn’t list any DLC for this game. New DLC shows up here automatically.
+      </Empty>
+    );
+  }
+  const shown = all ? dlc : dlc.slice(0, ADDONS_SHOWN);
+  return (
+    <>
+      <div className="addon-grid">
+        {shown.map((d) => (
+          <a key={d.appid} className="addon" href={d.url} target="_blank" rel="noreferrer noopener">
+            <div className="addon-art wide">{d.header_url ? <img src={d.header_url} alt="" loading="lazy" /> : <PuzzlePiece size={32} weight="thin" aria-hidden="true" />}</div>
+            <div className="addon-body">
+              <div className="row wrap" style={{ gap: 6 }}>
+                {d.coming_soon ? (
+                  <span className="chip chip-solid">Coming soon</span>
+                ) : (
+                  d.released_on && isRecent(d.released_on, 60) && <span className="chip chip-solid">New</span>
+                )}
+                {DLC_KINDS[d.kind] !== null && <span className="chip">{DLC_KINDS[d.kind] ?? d.kind}</span>}
+                {d.price?.discount > 0 && <span className="chip chip-sale">−{d.price.discount}%</span>}
+              </div>
+              <h3 className="addon-title">{d.name}</h3>
+              {d.description && <p className="addon-desc">{d.description}</p>}
+              <div className="addon-foot">
+                <span className="label">{d.released_on ? shortDate(d.released_on) : d.release_date || 'Release date TBA'}</span>
+                <Price price={d.price} isFree={d.is_free} />
+              </div>
+            </div>
+          </a>
+        ))}
+      </div>
+      {dlc.length > ADDONS_SHOWN && (
+        <button className="btn btn-sm" style={{ marginTop: 16 }} onClick={() => setAll((v) => !v)} aria-expanded={all}>
+          {all ? 'Show fewer' : `Show all ${dlc.length} DLC`}
+        </button>
+      )}
+    </>
+  );
+}
+
+function ExpansionList({ expansions, title }) {
+  const [all, setAll] = useState(false);
+  if (!expansions.length) {
+    return (
+      <Empty icon={PuzzlePiece} title="No expansions listed">
+        No expansions for {title} have been added yet.
+      </Empty>
+    );
+  }
+  const shown = all ? expansions : expansions.slice(0, ADDONS_SHOWN);
+  return (
+    <>
+      <div className="addon-grid">
+        {shown.map((e) => {
+          const El = e.url ? 'a' : 'div';
+          return (
+            <El key={`${e.source}-${e.bgg_id ?? e.name}`} className="addon" {...(e.url ? { href: e.url, target: '_blank', rel: 'noreferrer noopener' } : {})}>
+              <div className="addon-art">{e.image_url ? <img src={e.image_url} alt="" loading="lazy" /> : <PuzzlePiece size={32} weight="thin" aria-hidden="true" />}</div>
+              <div className="addon-body">
+                <h3 className="addon-title">{e.name}</h3>
+                {e.description && <p className="addon-desc">{e.description}</p>}
+                <div className="addon-foot">
+                  <span className="label">{e.year ?? ''}</span>
+                  {e.url && (
+                    <span className="link-btn muted">
+                      {e.source === 'bgg' || /boardgamegeek\.com/.test(e.url) ? 'BGG' : 'Details'} <ArrowSquareOut size={12} aria-hidden="true" />
+                    </span>
+                  )}
+                </div>
+              </div>
+            </El>
+          );
+        })}
+      </div>
+      {expansions.length > ADDONS_SHOWN && (
+        <button className="btn btn-sm" style={{ marginTop: 16 }} onClick={() => setAll((v) => !v)} aria-expanded={all}>
+          {all ? 'Show fewer' : `Show all ${expansions.length} expansions`}
+        </button>
       )}
     </>
   );
