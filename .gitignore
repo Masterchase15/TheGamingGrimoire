@@ -4,6 +4,8 @@ client/dist/
 .env.*
 !.env.example
 .localdb/
+.localuploads/
+game-assets/
 *.log
 .DS_Store
 Thumbs.db

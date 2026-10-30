@@ -6,7 +6,8 @@ import { query } from '../db/pool.js';
 export const GAME_FIELDS = [
   'slug', 'title', 'category', 'tagline', 'description', 'aliases', 'genres', 'platforms', 'developer',
   'publisher', 'release_year', 'players', 'play_time', 'age', 'is_continuous', 'featured', 'hue', 'hltb_query',
-  'steam_appid', 'bgg_id', 'patch_exclude', 'fandom_wiki', 'fandom_page', 'fandom_topics',
+  'steam_appid', 'bgg_id', 'patch_exclude', 'fandom_wiki', 'fandom_page', 'fandom_topics', 'wiki_url',
+  'thumbnail_url', 'banner_url', 'rulebook_url', 'rulebook_tldr', 'faq_url', 'unique_faq',
 ];
 
 const DEFAULTS = {
@@ -22,18 +23,23 @@ export async function upsertGame(db, g, { managedBy }) {
   const values = GAME_FIELDS.map((f) => g[f] ?? DEFAULTS[f] ?? null);
   values[GAME_FIELDS.indexOf('is_continuous')] = Boolean(g.is_continuous);
   values[GAME_FIELDS.indexOf('featured')] = Boolean(g.featured);
+  // JSONB columns: node-postgres would otherwise send these as Postgres arrays.
+  for (const f of ['rulebook_tldr', 'unique_faq']) values[GAME_FIELDS.indexOf(f)] = JSON.stringify(g[f] ?? []);
   const placeholders = GAME_FIELDS.map((_, i) => `$${i + 1}`).join(',');
   const updates = GAME_FIELDS.filter((f) => f !== 'slug').map((f) => `${f} = EXCLUDED.${f}`).join(', ');
   const { rows: [row] } = await db.query(
     `INSERT INTO games (${GAME_FIELDS.join(', ')}, managed_by)
      VALUES (${placeholders}, $${GAME_FIELDS.length + 1})
      ON CONFLICT (slug) DO UPDATE SET ${updates}, managed_by = EXCLUDED.managed_by,
+       hero_url = CASE WHEN games.banner_url IS NOT NULL AND EXCLUDED.banner_url IS NULL THEN NULL ELSE games.hero_url END,
        steam_assets_checked_at = CASE WHEN games.steam_appid IS DISTINCT FROM EXCLUDED.steam_appid
+         OR (games.banner_url IS NOT NULL AND EXCLUDED.banner_url IS NULL)
          THEN NULL ELSE games.steam_assets_checked_at END,
        store_checked_at = CASE WHEN games.steam_appid IS DISTINCT FROM EXCLUDED.steam_appid
          THEN NULL ELSE games.store_checked_at END,
        bgg_checked_at = CASE WHEN games.bgg_id IS DISTINCT FROM EXCLUDED.bgg_id
          THEN NULL ELSE games.bgg_checked_at END,
+       wiki_info = CASE WHEN games.wiki_url IS DISTINCT FROM EXCLUDED.wiki_url THEN NULL ELSE games.wiki_info END,
        hltb_checked_at = CASE WHEN games.title IS DISTINCT FROM EXCLUDED.title
          OR games.hltb_query IS DISTINCT FROM EXCLUDED.hltb_query THEN NULL ELSE games.hltb_checked_at END,
        updated_at = now()

@@ -5,7 +5,7 @@ import { useApi } from '../lib/api.js';
 import { CATEGORIES } from '../lib/format.js';
 import GameArt from '../components/GameArt.jsx';
 import { Crumbs, Empty, ErrorState, Spinner } from '../components/Common.jsx';
-import { Attribution, FandomMark, WikiSearch, wikiPath } from '../components/Fandom.jsx';
+import { Attribution, ExternalWiki, FandomMark, WikiSearch, wikiPath } from '../components/Fandom.jsx';
 
 const scrollToSection = (anchor) => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -96,7 +96,9 @@ export default function FandomArticle() {
   const pageReq = useApi(title ? `/games/${slug}/fandom/page?title=${encodeURIComponent(title)}` : null);
 
   const game = gameReq.data?.game;
-  const fandom = fandomReq.data?.fandom;
+  // A wiki that may only be linked to has no articles to show here.
+  const linkOnly = fandomReq.data?.fandom?.mode === 'link' ? fandomReq.data.fandom : null;
+  const fandom = linkOnly ? null : fandomReq.data?.fandom;
   const article = pageReq.data?.article;
   const sections = article?.sections ?? [];
   const currentSection = useCurrentSection(sections);
@@ -143,7 +145,8 @@ export default function FandomArticle() {
   }
 
   const cat = CATEGORIES[game.category];
-  const sitename = fandom?.sitename || 'Fandom';
+  const provider = fandom?.provider || 'Fandom';
+  const sitename = fandom?.sitename || provider;
 
   return (
     <div className="container page">
@@ -208,7 +211,9 @@ export default function FandomArticle() {
 
           <div className="wiki-mobile-nav">{fandom && <WikiSearch slug={game.slug} sitename={sitename} compact />}</div>
 
-          {pageReq.loading && !article ? (
+          {linkOnly ? (
+            <ExternalWiki wiki={linkOnly} />
+          ) : pageReq.loading && !article ? (
             <div className="stack" style={{ gap: 14 }}>
               <div className="skeleton" style={{ height: 64, width: '60%' }} />
               <div className="skeleton" style={{ height: 18 }} />
@@ -242,13 +247,13 @@ export default function FandomArticle() {
                       </b>{' '}
                       <i>/</i> {game.title} wiki
                     </span>
-                    {fandom && <FandomMark sitename={sitename} />}
+                    {fandom && <FandomMark sitename={sitename} provider={provider} />}
                   </div>
                   <h1 className="display article-title">{article.displayTitle || article.title}</h1>
                   {article.redirectedFrom && <p className="label" style={{ marginTop: 10 }}>Redirected from {article.redirectedFrom}</p>}
                   <div className="row wrap" style={{ marginTop: 18 }}>
                     <a href={article.url} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
-                      View on Fandom <ArrowSquareOut size={14} aria-hidden="true" />
+                      View on {provider} <ArrowSquareOut size={14} aria-hidden="true" />
                     </a>
                   </div>
                 </header>

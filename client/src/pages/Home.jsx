@@ -31,17 +31,30 @@ export function SectionHead({ index, kicker, title, link }) {
   );
 }
 
-// Three drifting rows of capsule art behind the hero.
+const WALL_ROW = 14;
+
+function shuffled(list) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// Three drifting rows of capsule art behind the hero: a random pick of the games
+// with art, chosen again on each visit.
 export function CapsuleWall({ games }) {
   const rows = useMemo(() => {
     const withArt = games.filter((g) => g.capsule_url);
     const pool = withArt.length >= 6 ? withArt : games;
     if (!pool.length) return [];
+    const picks = shuffled(pool).slice(0, WALL_ROW * 3);
     return [0, 1, 2].map((r) => {
-      const shifted = [...pool.slice(r * 3), ...pool.slice(0, r * 3)];
+      const chosen = shuffled(picks.filter((_, i) => i % 3 === r % Math.min(3, picks.length)));
       const row = [];
-      while (row.length < 14) row.push(...shifted);
-      return row.slice(0, 14);
+      while (row.length < WALL_ROW) row.push(...chosen);
+      return row.slice(0, WALL_ROW);
     });
   }, [games]);
   return (

@@ -1,12 +1,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, BookOpen, MagnifyingGlass, TextAa, X } from '@phosphor-icons/react';
+import { ArrowRight, BookOpen, BookOpenText, MagnifyingGlass, TextAa, X } from '@phosphor-icons/react';
 import { api, useDebounced } from '../lib/api.js';
-import { CATEGORIES } from '../lib/format.js';
+import { CATEGORIES, wikiPath } from '../lib/format.js';
 import GameArt from './GameArt.jsx';
 
 /**
- * Site-wide search with a live suggestions panel (games, wiki pages, glossary terms).
+ * Site-wide search with a live suggestions panel (games, articles from every game's
+ * wiki, the Grimoire's quick guides, glossary terms).
  * Pass `category` to scope results to one tab. Enter with nothing highlighted opens the full results page.
  */
 export default function SearchBox({ category, size, placeholder, autoFocus = false, inline = false, onNavigate }) {
@@ -52,6 +53,12 @@ export default function SearchBox({ category, size, placeholder, autoFocus = fal
     if (!results) return [];
     const list = [
       ...results.games.map((g) => ({ type: 'game', key: `g-${g.slug}`, to: `/game/${g.slug}`, data: g })),
+      ...(results.articles ?? []).map((a) => ({
+        type: 'article',
+        key: `a-${a.game_slug}-${a.title}`,
+        to: wikiPath(a.game_slug, a.title),
+        data: a,
+      })),
       ...results.pages.map((p) => ({
         type: 'page',
         key: `p-${p.game_slug}-${p.slug}`,
@@ -102,7 +109,7 @@ export default function SearchBox({ category, size, placeholder, autoFocus = fal
   }
 
   const showPanel = (open || inline) && q.trim().length > 0;
-  const empty = results && !results.games.length && !results.pages.length && !results.terms.length;
+  const empty = results && !results.games.length && !results.articles?.length && !results.pages.length && !results.terms.length;
   const label = placeholder || (category ? `Search ${CATEGORIES[category].label.toLowerCase()}…` : 'Search games, rules, keywords…');
   let index = -1;
   const optionProps = (item) => {
@@ -119,7 +126,8 @@ export default function SearchBox({ category, size, placeholder, autoFocus = fal
   };
   const groups = [
     ['game', 'Games'],
-    ['page', 'Wiki pages'],
+    ['article', 'Wiki articles'],
+    ['page', 'Quick guides'],
     ['term', 'Keywords & terms'],
   ];
 
@@ -202,7 +210,7 @@ function ResultVisual({ item }) {
   if (item.type === 'game') {
     return <GameArt game={item.data} className="search-thumb" showTitle={false} />;
   }
-  const Icon = item.type === 'page' ? BookOpen : TextAa;
+  const Icon = item.type === 'article' ? BookOpenText : item.type === 'page' ? BookOpen : TextAa;
   return (
     <span className="search-icon" aria-hidden="true">
       <Icon size={16} weight="bold" />
@@ -213,6 +221,7 @@ function ResultVisual({ item }) {
 function subtitle(item) {
   const d = item.data;
   if (item.type === 'game') return `${CATEGORIES[d.category].single}${d.release_year ? ` · ${d.release_year}` : ''}`;
-  if (item.type === 'page') return d.game_title;
+  if (item.type === 'article') return `${d.game_title} wiki`;
+  if (item.type === 'page') return `${d.game_title} · Quick guide`;
   return `${d.game_title} · ${d.definition}`;
 }

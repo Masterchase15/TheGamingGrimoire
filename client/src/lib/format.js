@@ -55,3 +55,7 @@ export function money(cents, currency = 'USD') {
     return `${(cents / 100).toFixed(2)} ${currency}`;
   }
 }
+
+/** Site path of a wiki article (Fandom or a game's own wiki); keeps "/" and ":" readable like MediaWiki does. */
+export const wikiPath = (slug, title) =>
+  `/game/${slug}/wiki/${encodeURIComponent(title.replace(/ /g, '_')).replace(/%2F/g, '/').replace(/%3A/g, ':')}`;

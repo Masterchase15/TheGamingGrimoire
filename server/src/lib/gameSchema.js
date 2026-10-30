@@ -31,6 +31,13 @@ const FIELDS = {
   fandom_wiki: { kind: 'fandom' },
   fandom_page: text(250),
   fandom_topics: { kind: 'list', max: 40 },
+  wiki_url: { kind: 'url' },
+  thumbnail_url: { kind: 'file' },
+  banner_url: { kind: 'file' },
+  rulebook_url: { kind: 'file' },
+  rulebook_tldr: { kind: 'tldr' },
+  faq_url: { kind: 'url' },
+  unique_faq: { kind: 'faq' },
 };
 
 // Required per category, on top of slug/title/category. A video game must say
@@ -76,6 +83,26 @@ function checkField(name, rule, v, errors) {
         return bad('is not a valid pattern');
       }
       return v;
+    case 'url':
+      // Drafts carry an empty wiki_url until one is filled in.
+      if (v === '') return null;
+      if (typeof v !== 'string' || !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v.trim()) || v.length > 500) return bad('must be a full web link, e.g. "https://en.uesp.net/wiki/Main_Page"');
+      return v.trim();
+    case 'file':
+      // A web link, or a file already uploaded to the site.
+      if (v === '') return null;
+      if (typeof v !== 'string' || !/^(https?:\/\/|\/api\/files\/)\S+$/i.test(v.trim()) || v.length > 500) return bad('must be an http(s) link');
+      return v.trim();
+    case 'tldr':
+      if (!Array.isArray(v) || v.length > 30) return bad('must be a list of sections (at most 30)');
+      if (v.some((s) => typeof s?.heading !== 'string' || !s.heading.trim() || !Array.isArray(s.points) || !s.points.length || s.points.some((p) => typeof p !== 'string' || !p.trim()))) {
+        return bad('each section needs a "heading" and a list of "points"');
+      }
+      return v.map((s) => ({ heading: s.heading.trim(), points: s.points.map((p) => p.trim()) }));
+    case 'faq':
+      if (!Array.isArray(v) || v.length > 50) return bad('must be a list of questions (at most 50)');
+      if (v.some((f) => typeof f?.q !== 'string' || !f.q.trim() || typeof f.a !== 'string' || !f.a.trim())) return bad('each entry needs "q" and "a" text');
+      return v.map((f) => ({ q: f.q.trim(), a: f.a.trim() }));
     case 'fandom':
       if (typeof v !== 'string' || !FANDOM_WIKI.test(v)) return bad('must be the wiki subdomain, e.g. "hades" for hades.fandom.com');
       return v;
@@ -193,14 +220,16 @@ export function validateGame(input, existing = null) {
 
   if (!game.tagline) warnings.push('No tagline: the game card will show an empty subtitle.');
   if (!game.description) warnings.push('No description: the game page will have no About text.');
-  if (!game.fandom_wiki) warnings.push('No fandom_wiki: the page will not have a Fandom wiki section.');
+  if (game.wiki_url && game.fandom_wiki) warnings.push('wiki_url is set, so the game uses that wiki and fandom_wiki is ignored.');
+  else if (!game.fandom_wiki && !game.wiki_url) warnings.push('No fandom_wiki or wiki_url: the page will not have a wiki section.');
+  if (game.category === 'video' && (game.rulebook_url || game.rulebook_tldr?.length || game.faq_url || game.unique_faq?.length)) warnings.push('Rulebooks, TLDRs and FAQs only show on board and card games.');
   if (game.category === 'video' && game.steam_appid == null) warnings.push('Not on Steam: the page will use a generated poster and show no patch notes.');
   if (game.category !== 'video' && game.steam_appid == null) warnings.push('No steam_appid: the page will use a generated poster instead of Steam art.');
   if (game.category === 'video' && game.bgg_id != null) warnings.push('bgg_id is only used for board and card games.');
   if (game.category !== 'video' && game.bgg_id == null && !expansions?.length) {
     warnings.push(`No bgg_id: expansions won't sync from BoardGameGeek (list them in "expansions" by hand if the game has any).`);
   }
-  if (!existing && !sections?.length) warnings.push('No wiki sections yet: only facts, Steam, HowLongToBeat and Fandom data will show.');
+  if (!existing && !sections?.length) warnings.push('No wiki sections yet: only facts, Steam, HowLongToBeat and wiki data will show.');
 
   return { game, sections, expansions, errors, warnings };
 }

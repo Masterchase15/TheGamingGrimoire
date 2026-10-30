@@ -1,8 +1,9 @@
-// Fandom (MediaWiki API) client. Every Fandom community exposes the standard
-// MediaWiki API at https://<wiki>.fandom.com/api.php. Responses are cached in
-// the fandom_cache table so pages load fast and we stay polite to Fandom.
-// Fandom text is CC BY-SA 3.0: every page we render carries attribution and a
-// link back to the original article.
+// Wiki (MediaWiki API) client. Every Fandom community exposes the standard
+// MediaWiki API at https://<wiki>.fandom.com/api.php; a game can instead name
+// its own wiki (wiki_url), which is used the same way when it runs MediaWiki and
+// its license allows republishing (see wikiLicense.js). Responses are cached in
+// the fandom_cache table so pages load fast and we stay polite to the wikis.
+// Every page we render carries the wiki's license and a link back to the article.
 import crypto from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 import { query } from '../db/pool.js';
@@ -14,17 +15,68 @@ const PAGE_TTL = 12 * 3600 * 1000;
 const SEARCH_TTL = 3600 * 1000;
 
 export const LICENSE = { name: 'CC BY-SA 3.0', url: 'https://www.fandom.com/licensing' };
-export const wikiBase = (wiki) => `https://${wiki}.fandom.com`;
+
+// A wiki we read from: { id, api, base, articlePath, host, provider, license }.
+// `id` keys the cache and the search index: the subdomain for Fandom wikis
+// (never contains a dot) and host + script path for other wikis.
+export const fandomSource = (wiki) => ({
+  id: wiki,
+  api: `https://${wiki}.fandom.com/api.php`,
+  base: `https://${wiki}.fandom.com`,
+  articlePath: '/wiki/$1',
+  host: `${wiki}.fandom.com`,
+  provider: 'Fandom',
+  license: LICENSE,
+});
+
+const externalSource = (info) => ({
+  id: info.id,
+  api: info.api,
+  base: info.base,
+  articlePath: info.articlePath,
+  host: new URL(info.base).host,
+  provider: info.provider,
+  license: { name: info.license.name, url: info.license.url },
+});
+
+/**
+ * The wiki a game's articles are read from, or null. A game's own wiki_url wins
+ * over its Fandom wiki, but only when that wiki was checked and is embeddable;
+ * otherwise the game links out to it (see externalWikiLink).
+ */
+export function sourceFor(game) {
+  if (game.wiki_url) return game.wiki_info?.embeddable ? externalSource(game.wiki_info) : null;
+  return game.fandom_wiki ? fandomSource(game.fandom_wiki) : null;
+}
+
+/** For a wiki_url whose license doesn't allow republishing: where "Read the wiki" goes instead. */
+export function externalWikiLink(game) {
+  if (!game.wiki_url || game.wiki_info?.embeddable) return null;
+  const info = game.wiki_info;
+  const host = new URL(game.wiki_url).host;
+  return {
+    mode: 'link',
+    sitename: info?.sitename ?? host,
+    provider: info?.provider ?? host,
+    baseUrl: game.wiki_url,
+    license: info?.license ? { name: info.license.name, url: info.license.url, reason: info.license.reason } : null,
+  };
+}
+
+// The search-index key of a game's wiki in SQL (games aliased as g); matches sourceFor().
+export const WIKI_KEY_SQL = `CASE WHEN g.wiki_url IS NOT NULL
+  THEN CASE WHEN (g.wiki_info->>'embeddable')::boolean THEN g.wiki_info->>'id' END
+  ELSE g.fandom_wiki END`;
 
 // MediaWiki page paths keep "/" and ":" readable.
 export const encodeTitle = (title) =>
   encodeURIComponent(title.replace(/ /g, '_')).replace(/%2F/g, '/').replace(/%3A/g, ':');
-export const articleUrl = (wiki, title) => `${wikiBase(wiki)}/wiki/${encodeTitle(title)}`;
+export const articleUrl = (source, title) => `${source.base}${source.articlePath.replace('$1', encodeTitle(title))}`;
 
-async function api(wiki, params) {
-  const url = `${wikiBase(wiki)}/api.php?${new URLSearchParams({ format: 'json', formatversion: '2', ...params })}`;
+export async function api(source, params) {
+  const url = `${source.api}?${new URLSearchParams({ format: 'json', formatversion: '2', ...params })}`;
   const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(12000) });
-  if (!res.ok) throw new Error(`Fandom request failed (${res.status})`);
+  if (!res.ok) throw new Error(`${source.provider} request failed (${res.status})`);
   const json = await res.json();
   if (json.error) {
     const err = new Error(json.error.info || json.error.code);
@@ -56,16 +108,17 @@ async function cached(key, ttl, loader) {
 const NON_ARTICLE = /^(file|image|media|category|special|template|user|user talk|talk|help|module|mediawiki|forum|message wall|blog|board|thread|map|project|.+ talk):/i;
 
 /** Game overview: the main article summary plus featured topic cards. */
-export function getOverview({ wiki, page, topics }) {
+export function getOverview(source, { page, topics }) {
   const sig = crypto.createHash('md5').update(JSON.stringify([page, topics])).digest('hex').slice(0, 10);
-  return cached(`overview:${wiki}:${sig}`, OVERVIEW_TTL, async () => {
-    const site = await api(wiki, { action: 'query', meta: 'siteinfo', siprop: 'general|statistics' });
+  return cached(`overview:${source.id}:${sig}`, OVERVIEW_TTL, async () => {
+    const site = await api(source, { action: 'query', meta: 'siteinfo', siprop: 'general|statistics' });
     const titles = [page, ...topics].filter(Boolean);
     const resolved = new Map();
+    const contentNs = await contentNamespaces(source);
     // TextExtracts handles up to 20 intro extracts per request.
     for (let i = 0; i < titles.length; i += 20) {
       const batch = titles.slice(i, i + 20);
-      const json = await api(wiki, {
+      const json = await api(source, {
         action: 'query',
         titles: batch.join('|'),
         redirects: '1',
@@ -84,7 +137,7 @@ export function getOverview({ wiki, page, topics }) {
       for (const t of batch) {
         const finalTitle = hop(q.redirects ?? [], hop(q.normalized ?? [], t));
         const p = pages.get(finalTitle);
-        if (!p || p.missing || p.ns !== 0 || p.pageprops?.disambiguation !== undefined) continue;
+        if (!p || p.missing || !contentNs.includes(p.ns) || p.pageprops?.disambiguation !== undefined) continue;
         resolved.set(t, {
           title: p.title,
           extract: (p.extract || '').replace(/\s+/g, ' ').trim() || null,
@@ -98,7 +151,7 @@ export function getOverview({ wiki, page, topics }) {
     // fall back to the first real paragraph of the article's lead section.
     const missing = [...resolved.values()].filter((r) => !r.extract);
     await mapLimit(missing, 4, async (r) => {
-      r.extract = await introParagraph(wiki, r.title).catch(() => null);
+      r.extract = await introParagraph(source, r.title).catch(() => null);
     });
 
     const main = resolved.get(page) ?? null;
@@ -113,14 +166,16 @@ export function getOverview({ wiki, page, topics }) {
     }
     const g = site.query.general;
     return {
-      wiki,
+      mode: 'embed',
+      wiki: source.id,
       sitename: g.sitename,
-      baseUrl: wikiBase(wiki),
+      provider: source.provider,
+      baseUrl: source.base,
       articles: site.query.statistics?.articles ?? null,
       logo: g.logo || null,
-      main: main && { ...main, url: articleUrl(wiki, main.title) },
+      main: main && { ...main, url: articleUrl(source, main.title) },
       topics: topicCards,
-      license: LICENSE,
+      license: source.license,
     };
   });
 }
@@ -143,8 +198,8 @@ const decodeEntities = (s) =>
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
 
 /** First substantial paragraph of an article's lead, as plain text (~2 sentences). */
-async function introParagraph(wiki, title) {
-  const json = await api(wiki, { action: 'parse', page: title, prop: 'text', section: '0', disableeditsection: '1', redirects: '1' });
+async function introParagraph(source, title) {
+  const json = await api(source, { action: 'parse', page: title, prop: 'text', section: '0', disableeditsection: '1', redirects: '1' });
   const html = json.parse.text
     .replace(/<(aside|table|figure|style|script|blockquote)[\s\S]*?<\/\1>/gi, '')
     .replace(/<div[^>]*class="[^"]*quote[^"]*"[\s\S]*?<\/div>/gi, '')
@@ -169,11 +224,11 @@ async function introParagraph(wiki, title) {
 }
 
 /** A full article, sanitized and with wiki links rewritten to stay inside the site. */
-export function getArticle(wiki, title, slug) {
-  return cached(`page:${wiki}:${title}`, PAGE_TTL, async () => {
+export function getArticle(source, title, slug) {
+  return cached(`page:${source.id}:${title}`, PAGE_TTL, async () => {
     let json;
     try {
-      json = await api(wiki, {
+      json = await api(source, {
         action: 'parse',
         page: title,
         redirects: '1',
@@ -189,7 +244,7 @@ export function getArticle(wiki, title, slug) {
     return {
       title: p.title,
       displayTitle: sanitizeHtml(p.displaytitle || p.title, { allowedTags: [], allowedAttributes: {} }),
-      html: cleanArticle(p.text, wiki, slug),
+      html: cleanArticle(p.text, source, slug),
       sections: (p.sections ?? [])
         .filter((s) => Number(s.level) <= 3 && s.anchor)
         .map((s) => ({
@@ -197,22 +252,34 @@ export function getArticle(wiki, title, slug) {
           anchor: s.anchor,
           title: sanitizeHtml(s.line, { allowedTags: [], allowedAttributes: {} }),
         })),
-      url: articleUrl(wiki, p.title),
-      historyUrl: `${articleUrl(wiki, p.title)}?action=history`,
+      url: articleUrl(source, p.title),
+      historyUrl: `${source.api.replace(/api\.php$/, 'index.php')}?title=${encodeTitle(p.title)}&action=history`,
       redirectedFrom: p.redirects?.[0]?.from ?? null,
     };
   });
 }
 
+/**
+ * The namespaces that hold a wiki's articles. Usually just 0, but some wikis keep
+ * them in their own namespaces (UESP files Skyrim articles under "Skyrim:").
+ */
+export function contentNamespaces(source) {
+  return cached(`namespaces:${source.id}`, OVERVIEW_TTL * 7, async () => {
+    const json = await api(source, { action: 'query', meta: 'siteinfo', siprop: 'namespaces' });
+    const ids = Object.values(json.query?.namespaces ?? {}).filter((n) => n.content && n.id >= 0).map((n) => n.id);
+    return ids.length ? ids : [0];
+  });
+}
+
 /** Full-text search inside one wiki. Snippets keep only <mark> highlights. */
-export function searchWiki(wiki, q) {
-  return cached(`search:${wiki}:${q.toLowerCase()}`, SEARCH_TTL, async () => {
-    const json = await api(wiki, {
+export function searchWiki(source, q) {
+  return cached(`search:${source.id}:${q.toLowerCase()}`, SEARCH_TTL, async () => {
+    const json = await api(source, {
       action: 'query',
       list: 'search',
       srsearch: q,
       srlimit: '12',
-      srnamespace: '0',
+      srnamespace: (await contentNamespaces(source)).join('|'),
       srprop: 'snippet',
     });
     return (json.query?.search ?? []).map((r) => ({
@@ -240,19 +307,19 @@ const DROP_CLASSES = [
   'article-comments',
 ];
 
-function rewriteHref(href, wiki, slug) {
+function rewriteHref(href, source, slug) {
   if (!href) return { href: null };
   if (href.startsWith('#')) return { href };
   let url;
   try {
-    url = new URL(href, wikiBase(wiki));
+    url = new URL(href, source.base);
   } catch {
     return { href: null };
   }
   if (!/^https?:$/.test(url.protocol)) return { href: null };
-  const sameWiki = url.host === `${wiki}.fandom.com`;
-  if (sameWiki && url.pathname.startsWith('/wiki/') && !url.search) {
-    const title = decodeURIComponent(url.pathname.slice(6)).replace(/_/g, ' ');
+  const prefix = source.articlePath.replace('$1', '');
+  if (url.host === source.host && url.pathname.startsWith(prefix) && !url.search) {
+    const title = decodeURIComponent(url.pathname.slice(prefix.length)).replace(/_/g, ' ');
     if (title && !NON_ARTICLE.test(title)) {
       return { href: `/game/${slug}/wiki/${encodeTitle(title)}${url.hash}`, internal: true };
     }
@@ -260,7 +327,7 @@ function rewriteHref(href, wiki, slug) {
   return { href: url.toString(), external: true };
 }
 
-function cleanArticle(html, wiki, slug) {
+function cleanArticle(html, source, slug) {
   return sanitizeHtml(html, {
     allowedTags: [
       'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'blockquote', 'pre', 'code', 'b', 'strong', 'i', 'em', 'u', 's',
@@ -288,6 +355,7 @@ function cleanArticle(html, wiki, slug) {
         // Fandom lazy-loads images: the real URL lives in data-src.
         let src = attribs['data-src'] || attribs.src || '';
         if (src.startsWith('//')) src = `https:${src}`;
+        else if (src.startsWith('/')) src = `${source.base}${src}`; // wiki.gg and most self-hosted wikis
         if (!src.startsWith('https://')) src = '';
         return {
           tagName,
@@ -304,7 +372,7 @@ function cleanArticle(html, wiki, slug) {
         };
       },
       a: (tagName, attribs) => {
-        const { href, internal, external } = rewriteHref(attribs.href, wiki, slug);
+        const { href, internal, external } = rewriteHref(attribs.href, source, slug);
         if (!href) return { tagName: 'span', attribs: attribs.class ? { class: attribs.class } : {} };
         return {
           tagName,
