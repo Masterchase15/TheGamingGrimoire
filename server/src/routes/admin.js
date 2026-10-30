@@ -1,18 +1,23 @@
 // Admin API for adding and updating games. Every route requires an admin (see
 // lib/admin.js). Games written here are marked managed_by = 'api' so the
 // startup seed sync never overwrites them.
-import { Router } from 'express';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import express, { Router } from 'express';
 import { query, withTransaction } from '../db/pool.js';
 import { requireAdmin } from '../lib/admin.js';
-import { getOverview } from '../lib/fandom.js';
+import { getOverview, sourceFor } from '../lib/fandom.js';
 import { GAME_FIELDS, loadGame, replaceExpansions, replaceSections, upsertGame } from '../lib/gameStore.js';
 import { validateGame } from '../lib/gameSchema.js';
+import { UPLOADS_DIR } from '../lib/env.js';
 import { hasBggToken } from '../lib/bgg.js';
 import { syncExpansions } from '../lib/bggSync.js';
 import { ensureHltb } from '../lib/hltb.js';
 import { HttpError } from '../lib/session.js';
 import { hasSteamKey } from '../lib/steam.js';
 import { syncAssets, syncGameNews, syncGameStore } from '../lib/steamSync.js';
+import { ensureWikiInfo, indexGameWiki } from '../lib/wikiSync.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -29,8 +34,9 @@ const audit = (db, req, action, slug, details) =>
 const failure = (err) => ({ error: err.message });
 
 // Pulls Steam art/patch notes/price/DLC, BoardGameGeek expansions, HowLongToBeat
-// times and the Fandom overview for a game right away, so its page is complete
-// without waiting for the background syncs.
+// times and the wiki overview (Fandom, or the license check of a wiki_url) for a
+// game right away, so its page is complete without waiting for the background syncs.
+// The wiki's search index is built in the background afterwards.
 async function enrich(id, { force = false } = {}) {
   if (force) await query(`UPDATE games SET hltb_checked_at = NULL WHERE id = $1`, [id]);
   const { rows: [g] } = await query(`SELECT * FROM games WHERE id = $1`, [id]);
@@ -85,10 +91,23 @@ async function enrich(id, { force = false } = {}) {
       : { found: false, hint: 'Set hltb_query to the exact title HowLongToBeat uses.' };
   }
 
-  if (!g.fandom_wiki) out.fandom = { skipped: 'No fandom_wiki.' };
+  const wg = await ensureWikiInfo(g, { force: force || !g.wiki_info });
+  const source = sourceFor(wg);
+  if (wg.wiki_url) {
+    const info = wg.wiki_info;
+    out.wiki = {
+      url: wg.wiki_url,
+      sitename: info.sitename ?? null,
+      license: info.license,
+      embeddable: info.embeddable,
+      ...(info.error ? { error: info.error } : {}),
+      ...(info.license?.reusable && !info.api ? { noApi: true } : {}),
+    };
+  }
+  if (!source) out.fandom = { skipped: wg.wiki_url ? 'Links out to the wiki (its articles are not shown on the site).' : 'No fandom_wiki.' };
   else {
     try {
-      const o = await getOverview({ wiki: g.fandom_wiki, page: g.fandom_page, topics: g.fandom_topics });
+      const o = await getOverview(source, { page: g.fandom_page, topics: g.fandom_topics });
       out.fandom = {
         wiki: o.sitename,
         mainArticle: o.main?.title ?? null,
@@ -98,6 +117,7 @@ async function enrich(id, { force = false } = {}) {
     } catch (err) {
       out.fandom = failure(err);
     }
+    indexGameWiki(wg, { force }).catch((err) => console.warn(`[wiki] Indexing ${g.slug} failed: ${err.message}`));
   }
   return out;
 }
@@ -144,6 +164,10 @@ router.post('/games', async (req, res) => {
     return row;
   });
 
+  await query(
+    `UPDATE games SET capsule_url = COALESCE(thumbnail_url, capsule_url), hero_url = COALESCE(banner_url, hero_url) WHERE id = $1`,
+    [id]
+  );
   const enrichment = await enrich(id);
   res.status(created ? 201 : 200).json({
     status: created ? 'created' : 'updated',
@@ -153,6 +177,41 @@ router.post('/games', async (req, res) => {
     warnings,
     enrichment,
   });
+});
+
+const UPLOADS = {
+  thumbnail: { column: 'thumbnail_url', shows: 'capsule_url', types: { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif' } },
+  banner: { column: 'banner_url', shows: 'hero_url', types: { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif' } },
+  rulebook: { column: 'rulebook_url', types: { 'application/pdf': 'pdf' } },
+};
+
+// Stores a game's thumbnail, banner or rulebook in UPLOADS_DIR (the body is the file itself)
+// and points the game at it. Sent by the add-game scripts after the game is saved.
+router.put('/games/:slug/files/:kind', express.raw({ type: () => true, limit: '60mb' }), async (req, res) => {
+  const upload = UPLOADS[req.params.kind];
+  if (!upload) throw new HttpError(404, 'Unknown file kind.');
+  const ext = upload.types[req.get('content-type')];
+  if (!ext) throw new HttpError(400, `Unsupported file type. Use ${Object.values(upload.types).join(', ')}.`);
+  if (!req.body?.length) throw new HttpError(400, 'The file is empty.');
+  if (ext === 'pdf' && req.body.subarray(0, 5).toString() !== '%PDF-') throw new HttpError(400, 'That file is not a PDF.');
+  const { rows: [g] } = await query(`SELECT id, slug, category FROM games WHERE slug = $1`, [req.params.slug]);
+  if (!g) throw new HttpError(404, 'Game not found.');
+  if (req.params.kind === 'rulebook' && g.category === 'video') throw new HttpError(400, 'Only board and card games have rulebooks.');
+
+  const dir = path.join(UPLOADS_DIR, g.slug);
+  await fs.mkdir(dir, { recursive: true });
+  const hash = crypto.createHash('sha256').update(req.body).digest('hex').slice(0, 12);
+  const name = `${req.params.kind}-${hash}.${ext}`;
+  await fs.writeFile(path.join(dir, name), req.body);
+  for (const old of await fs.readdir(dir)) {
+    if (old.startsWith(`${req.params.kind}-`) && old !== name) await fs.rm(path.join(dir, old));
+  }
+
+  const url = `/api/files/${g.slug}/${name}`;
+  await query(`UPDATE games SET ${upload.column} = $2 WHERE id = $1`, [g.id, url]);
+  if (upload.shows) await query(`UPDATE games SET ${upload.shows} = $2 WHERE id = $1`, [g.id, url]);
+  await audit({ query }, req, 'upload', g.slug, { kind: req.params.kind, name, bytes: req.body.length });
+  res.json({ url, bytes: req.body.length });
 });
 
 // Re-fetch Steam, BoardGameGeek, HowLongToBeat and Fandom data for a game now, ignoring caches.

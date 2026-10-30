@@ -7,7 +7,8 @@ import { migrate } from './db/migrate.js';
 import { seed } from './seed/seed.js';
 import { startSteamSync } from './lib/steamSync.js';
 import { startBggSync } from './lib/bggSync.js';
-import { PORT, ROOT_DIR, isProd } from './lib/env.js';
+import { startWikiSync } from './lib/wikiSync.js';
+import { PORT, ROOT_DIR, UPLOADS_DIR, isProd } from './lib/env.js';
 import { loadSession } from './lib/session.js';
 import gamesRouter from './routes/games.js';
 import searchRouter from './routes/search.js';
@@ -27,6 +28,17 @@ app.all('/api/auth/*splat', toNodeHandler(auth));
 
 // Admin requests can carry a whole game's wiki content, so they get a larger body limit.
 app.use('/api/admin', express.json({ limit: '2mb' }), loadSession, adminRouter);
+
+// Uploaded thumbnails and rulebooks. Names contain a hash of the file, so they can be cached for good.
+app.use(
+  '/api/files',
+  express.static(UPLOADS_DIR, {
+    index: false,
+    immutable: true,
+    maxAge: '30d',
+    setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+  })
+);
 
 app.use(express.json({ limit: '100kb' }));
 app.use('/api', loadSession);
@@ -57,4 +69,5 @@ await migrate();
 await seed();
 startSteamSync();
 startBggSync();
+startWikiSync();
 app.listen(PORT, () => console.log(`TheGamingGrimoire API listening on http://localhost:${PORT}`));

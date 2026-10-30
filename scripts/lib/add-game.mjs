@@ -4,6 +4,17 @@
 //   video  Steam (app id, developer, publisher, year, genres) + Fandom
 //   board  BoardGameGeek (bgg_id, players, play time, age, designers; needs BGG_API_TOKEN) + Fandom
 //   card   BoardGameGeek (same as board; BGG lists most card games) + Fandom
+// When no Fandom wiki is found, answer "n" to sending, put another wiki's link in
+// the draft's "wiki_url" and send the draft with --file. That wiki's license decides
+// whether its articles are shown on the site or only linked to (server/src/lib/wikiLicense.js).
+//
+// Files go in the game-assets folder. In a draft, "thumbnail" and "banner" (all categories) and
+// "rulebook" (board and card games) hold a file name from that folder, or a web link,
+// and "faq" (board and card games) holds a link to a site with the game's FAQs.
+// "unique_faq" lists questions that site doesn't cover: [{ "q": "...", "a": "..." }].
+// When a game with a rulebook has no "rulebook_tldr" yet, Claude reads the PDF and
+// writes it, and fills empty Details fields (needs ANTHROPIC_API_KEY in .env; see
+// rulebook.mjs). The results are saved in the draft, so you can edit them.
 // After saving, the server itself fetches Steam art (any game with a steam_appid),
 // patch notes, price, DLC and HowLongToBeat times (video games), BoardGameGeek
 // expansions (board/card games with a bgg_id) and the Fandom overview.
@@ -21,6 +32,7 @@
 //                             board/card: Steam app of a digital version, used only for artwork (no lookup)
 //   --bgg <id|none>           board/card: BoardGameGeek id, skips the BGG search; "none" = not on BGG
 //   --fandom <wiki|none>      Fandom subdomain, e.g. "hades" for hades.fandom.com
+//   --regenerate              read the rulebook again, replacing "rulebook_tldr"
 //   --dry-run                 look up and preview only; send nothing
 //   --yes                     send without asking
 //   --api <url>               site to send to (default: GRIMOIRE_API_URL or http://localhost:3001)
@@ -34,10 +46,14 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { bggLookup, hasBggToken } from '../../server/src/lib/bgg.js';
+import { fandomSubdomain, inspectWiki } from '../../server/src/lib/wikiLicense.js';
+
+const MAX_PDF_BYTES = 23 * 1024 * 1024; // see rulebook.mjs
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 dotenv.config({ path: path.join(root, '.env'), quiet: true });
 const DRAFTS = path.join(root, 'game-drafts');
+const ASSETS = path.join(root, 'game-assets');
 const UA = 'TheGamingGrimoire-importer/1.0 (https://github.com/Masterchase15/TheGamingGrimoire)';
 
 const COMMANDS = { video: 'add-vgame', board: 'add-bgame', card: 'add-cgame' };
@@ -59,7 +75,7 @@ function parseArgs(argv) {
   const o = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (['--dry-run', '--yes'].includes(a)) o[a.slice(2)] = true;
+    if (['--dry-run', '--yes', '--regenerate'].includes(a)) o[a.slice(2)] = true;
     else if (a.startsWith('--')) o[a.slice(2)] = argv[++i];
     else o._.push(a);
   }
@@ -103,6 +119,24 @@ async function admin(method, route, body) {
   return { status: res.status, json };
 }
 
+async function uploadFile(slug, { kind, file, type }) {
+  const body = fs.readFileSync(file);
+  let res;
+  try {
+    res = await fetch(`${API}/api/admin/games/${slug}/files/${kind}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': type },
+      body,
+      signal: AbortSignal.timeout(300000),
+    });
+  } catch {
+    fail(`Could not upload ${path.basename(file)} to ${API}.`);
+  }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) fail(`Upload of ${path.basename(file)} failed: ${json.error ?? res.status}`);
+  console.log(`  ${(kind[0].toUpperCase() + kind.slice(1)).padEnd(14)} ${c.ok(`uploaded ${path.basename(file)}`)} ${c.dim(`(${(body.length / 1048576).toFixed(1)} MB)`)}`);
+}
+
 // ---------- lookups ----------
 async function steamLookup(title, { exactOnly }) {
   const search = await getJson(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(title)}&l=english&cc=US`);
@@ -137,22 +171,29 @@ function fandomCandidates(title) {
     .filter((w) => w.length >= 3);
 }
 
+// The article about the game on a MediaWiki wiki: { page, first } (first = top search hit).
+async function findArticle(api, general, title) {
+  const found = await getJson(
+    `${api}?${new URLSearchParams({ action: 'query', list: 'search', srsearch: title, srnamespace: '0', srlimit: '5', format: 'json', formatversion: '2' })}`
+  );
+  // The wiki's front page ("Wingspan Wiki") is never the game's article.
+  const results = (found.query?.search ?? []).filter((r) => r.title !== general.sitename && r.title !== general.mainpage);
+  const page = results.find((r) => norm(r.title) === norm(title)) ?? results.find((r) => norm(r.title).startsWith(norm(title)));
+  return { page: page?.title ?? null, first: results[0]?.title ?? null };
+}
+
 async function fandomLookup(title, forced) {
   const wikis = forced ? [forced] : fandomCandidates(title);
   for (const wiki of wikis) {
     try {
-      const site = await getJson(`https://${wiki}.fandom.com/api.php?action=query&meta=siteinfo&format=json&formatversion=2`);
+      const api = `https://${wiki}.fandom.com/api.php`;
+      const site = await getJson(`${api}?action=query&meta=siteinfo&format=json&formatversion=2`);
       if (!site.query?.general?.server?.includes(`${wiki}.fandom.com`)) continue;
-      const found = await getJson(
-        `https://${wiki}.fandom.com/api.php?${new URLSearchParams({ action: 'query', list: 'search', srsearch: title, srnamespace: '0', srlimit: '5', format: 'json', formatversion: '2' })}`
-      );
-      // The wiki's front page ("Wingspan Wiki") is never the game's article.
-      const results = (found.query?.search ?? []).filter((r) => r.title !== site.query.general.sitename && r.title !== site.query.general.mainpage);
-      const page = results.find((r) => norm(r.title) === norm(title)) ?? results.find((r) => norm(r.title).startsWith(norm(title)));
+      const { page, first } = await findArticle(api, site.query.general, title);
       // A guessed subdomain only counts if the wiki has an article about this game
       // (e.g. "Spirit Island" must not land on an unrelated spirit.fandom.com).
       if (!page && !forced) continue;
-      return { wiki, sitename: site.query.general.sitename, page: (page ?? results[0])?.title ?? null };
+      return { wiki, sitename: site.query.general.sitename, page: page ?? first };
     } catch {
       // not a wiki (Fandom redirects unknown subdomains to an HTML page)
     }
@@ -162,7 +203,7 @@ async function fandomLookup(title, forced) {
 
 
 // ---------- draft building ----------
-const ORDER = ['slug', 'title', 'category', 'tagline', 'description', 'aliases', 'genres', 'platforms', 'developer', 'publisher', 'release_year', 'players', 'play_time', 'age', 'is_continuous', 'featured', 'hue', 'hltb_query', 'steam_appid', 'bgg_id', 'patch_exclude', 'fandom_wiki', 'fandom_page', 'fandom_topics', 'expansions', 'sections'];
+const ORDER = ['slug', 'title', 'category', 'tagline', 'description', 'aliases', 'genres', 'platforms', 'developer', 'publisher', 'release_year', 'players', 'play_time', 'age', 'is_continuous', 'featured', 'hue', 'hltb_query', 'steam_appid', 'bgg_id', 'patch_exclude', 'thumbnail', 'banner', 'rulebook', 'wiki_url', 'fandom_wiki', 'fandom_page', 'fandom_topics', 'rulebook_tldr', 'faq', 'unique_faq', 'expansions', 'sections'];
 const ordered = (g) => Object.fromEntries([...ORDER.filter((k) => k in g).map((k) => [k, g[k]]), ...Object.entries(g).filter(([k]) => !ORDER.includes(k))]);
 const draftPath = (slug) => path.join(DRAFTS, `${slug}.json`);
 function saveDraft(game) {
@@ -255,7 +296,116 @@ async function fandomStep(g, notes) {
     notes.push(`Check that ${f.wiki}.fandom.com is the right wiki. Add article titles to "fandom_topics" to feature them on the game page.`);
   } else {
     console.log(c.warn('none found'));
-    notes.push('No Fandom wiki found. Pass --fandom <subdomain> if there is one.');
+    notes.push(`No Fandom wiki found. Pass --fandom <subdomain> if there is one, or put another wiki's link in "wiki_url" in game-drafts/${g.slug}.json.`);
+  }
+}
+
+// A wiki that isn't on Fandom, from the draft's "wiki_url". Reads its license the
+// same way the server will, so the preview shows whether the site can show its
+// articles or will link to it. Its article about the game goes in fandom_page.
+async function customWikiStep(g, notes) {
+  const url = g.wiki_url.trim();
+  const sub = fandomSubdomain(url);
+  if (sub) {
+    // A Fandom link: use it as the game's Fandom wiki.
+    g.wiki_url = '';
+    if (g.fandom_wiki !== sub) delete g.fandom_page;
+    g.fandom_wiki = sub;
+    opts.fandom = sub;
+    return fandomStep(g, notes);
+  }
+  g.wiki_url = url;
+  if (g.fandom_wiki) {
+    // The wiki_url replaces the Fandom wiki; its article and topics belonged to Fandom.
+    console.log(c.dim(`wiki_url is set, so ${g.fandom_wiki}.fandom.com is dropped from the draft.`));
+    delete g.fandom_wiki;
+    delete g.fandom_page;
+    g.fandom_topics = [];
+  }
+  process.stdout.write(`Checking ${url} and its license... `);
+  let w;
+  try {
+    w = await inspectWiki(url);
+  } catch (err) {
+    console.log(c.bad('failed'));
+    fail(`"wiki_url" can't be used: ${err.message}`);
+  }
+  const lic = w.license;
+  console.log(`${c.b(w.sitename)}, ${lic ? lic.name : 'license unknown'}`);
+  if (w.embeddable) {
+    console.log(c.ok(`  ✔ ${lic.name} ${lic.reason}: its articles will show on the site like a Fandom wiki, credited to ${w.sitename}.`));
+    g.fandom_topics ??= [];
+    if (!g.fandom_page) {
+      const found = await findArticle(w.api, { sitename: w.sitename, mainpage: w.mainpage }, g.title).catch(() => null);
+      if (found?.page) {
+        g.fandom_page = found.page;
+        console.log(c.dim(`  Article about the game: "${found.page}"`));
+      } else notes.push(`No article named after the game on ${w.sitename}. Set "fandom_page" to the article "Read the wiki" should open.`);
+    }
+    notes.push(`Add article titles from ${w.sitename} to "fandom_topics" to feature them on the game page.`);
+  } else if (lic?.reusable) {
+    console.log(c.warn(`  ! ${lic.name} allows reuse, but the site isn't a MediaWiki wiki, so "Read the wiki" will link to it.`));
+  } else {
+    console.log(c.warn(`  ! ${lic?.name ?? 'The license'} ${lic?.reason ?? 'could not be read'}: "Read the wiki" will link to ${w.url} instead of showing its articles.`));
+  }
+}
+
+// The draft's own wiki_url when it has one, otherwise Fandom.
+const wikiStep = (g, notes) => (g.wiki_url?.trim() ? customWikiStep(g, notes) : fandomStep(g, notes));
+
+// ---------- files ----------
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.avif': 'image/avif' };
+const FILE_TYPES = {
+  thumbnail: IMAGE_TYPES,
+  banner: IMAGE_TYPES,
+  rulebook: { '.pdf': 'application/pdf' },
+};
+const isWebLink = (v) => /^https?:\/\//i.test(v);
+const isUploaded = (v) => v.startsWith('/api/files/'); // already on the site (from --pull)
+
+// A draft's thumbnail, banner or rulebook file on this computer: a name inside game-assets, or a full path.
+function localFile(kind, value) {
+  const file = path.resolve(ASSETS, value);
+  if (!fs.existsSync(file)) fail(`"${kind}": ${file} doesn't exist. Put the file in game-assets, or use a full path.`);
+  const type = FILE_TYPES[kind][path.extname(file).toLowerCase()];
+  if (!type) fail(`"${kind}": use a ${Object.keys(FILE_TYPES[kind]).join(', ')} file.`);
+  return { file, type };
+}
+
+async function loadPdf(value) {
+  if (isUploaded(value)) {
+    const res = await fetch(`${API}${value}`, { signal: AbortSignal.timeout(60000) });
+    if (!res.ok) throw new Error(`${value} answered ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  }
+  if (!isWebLink(value)) return fs.readFileSync(localFile('rulebook', value).file);
+  const res = await fetch(value, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(60000) });
+  if (!res.ok) throw new Error(`${new URL(value).host} answered ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// Board and card games: Claude reads the rulebook for the TLDR and Details. Skipped
+// when the draft already has them, so edits (and the cost of reading it) aren't repeated.
+async function rulebookStep(g, notes) {
+  const rulebook = g.rulebook?.trim();
+  if (!rulebook) return;
+  if (g.rulebook_tldr?.length && !opts.regenerate) return;
+  process.stdout.write('Reading the rulebook with Claude (can take a minute or two)... ');
+  try {
+    const pdf = await loadPdf(rulebook);
+    if (pdf.length > MAX_PDF_BYTES) throw new Error(`the PDF is ${(pdf.length / 1048576).toFixed(0)} MB; the limit is ${MAX_PDF_BYTES / 1048576} MB`);
+    const { readRulebook } = await import('./rulebook.mjs');
+    const { tldr, details, usage } = await readRulebook(pdf, g.title);
+    console.log(c.ok(`${tldr.length} TLDR sections`) + c.dim(` (${usage.input.toLocaleString()} tokens in, ${usage.output.toLocaleString()} out)`));
+    g.rulebook_tldr = tldr;
+    for (const k of ['players', 'play_time', 'age', 'publisher']) fill(g, k, details[k] || null);
+    fill(g, 'developer', details.designer || null);
+    fill(g, 'release_year', Number(details.release_year) || null);
+    notes.push('Read over "rulebook_tldr" and the Details fields in the draft: they were written by Claude from the rulebook.');
+  } catch (err) {
+    console.log(c.warn('skipped'));
+    const why = /authentication/i.test(err.message) ? 'no Claude API key found' : err.message;
+    notes.push(`Couldn't read the rulebook (${why}). Set ANTHROPIC_API_KEY in .env, or fill in "rulebook_tldr" by hand.`);
   }
 }
 
@@ -268,9 +418,9 @@ function tabletopSteam(g, notes) {
 }
 
 const STEPS = {
-  video: [steamStep, fandomStep],
-  board: [bggStep, fandomStep],
-  card: [bggStep, fandomStep],
+  video: [steamStep, wikiStep],
+  board: [bggStep, wikiStep, rulebookStep],
+  card: [bggStep, wikiStep, rulebookStep],
 };
 
 async function buildDraft(title) {
@@ -299,6 +449,15 @@ async function buildDraft(title) {
   //   { "name": "...", "year": 2024, "description": "...", "image": "https://...", "url": "https://..." }
   if (CATEGORY !== 'video') g.expansions ??= [];
 
+  g.thumbnail ??= '';
+  g.banner ??= '';
+  g.wiki_url ??= '';
+  if (CATEGORY !== 'video') {
+    g.rulebook ??= '';
+    g.rulebook_tldr ??= [];
+    g.faq = typeof g.faq === 'string' ? g.faq : '';
+    g.unique_faq ??= [];
+  }
   g.aliases ??= [];
   if (g.hue === undefined) g.hue = hueFor(g.slug);
   if (!g.sections) g.sections = [];
@@ -328,7 +487,13 @@ function preview(g) {
     show('bgg_id', g.bgg_id ? `${g.bgg_id}  ${c.dim(`https://boardgamegeek.com/boardgame/${g.bgg_id}`)}` : null);
     show('expansions', `${g.expansions?.length ?? 0} listed by hand${g.bgg_id ? ' (+ synced from BoardGameGeek)' : ''}`);
   }
-  show('fandom', g.fandom_wiki ? `${g.fandom_wiki}.fandom.com → ${g.fandom_page ?? g.title}` : null);
+  if (g.thumbnail) show('thumbnail', g.thumbnail);
+  if (g.banner) show('banner', g.banner);
+  if (g.category !== 'video' && g.rulebook) show('rulebook', `${g.rulebook}  ${c.dim(`${g.rulebook_tldr?.length ?? 0} TLDR sections`)}`);
+  if (g.category !== 'video' && typeof g.faq === 'string' && g.faq) show('faq', g.faq);
+  if (g.category !== 'video' && g.unique_faq?.length) show('unique_faq', `${g.unique_faq.length} questions`);
+  if (g.wiki_url) show('wiki', `${g.wiki_url}${g.fandom_page ? ` → ${g.fandom_page}` : ''}`);
+  else show('fandom', g.fandom_wiki ? `${g.fandom_wiki}.fandom.com → ${g.fandom_page ?? g.title}` : null);
   show('sections', `${g.sections?.length ?? 0}`);
 }
 
@@ -347,7 +512,13 @@ function printEnrichment(e) {
     console.log(`  ${'Expansions'.padEnd(14)} ${text}`);
   }
   if (CATEGORY === 'video') line('HowLongToBeat', e.hltb, (r) => (r.found ? c.ok(`"${r.name}": ${r.main ?? '?'}h main / ${r.extra ?? '?'}h extras / ${r.complete ?? '?'}h completionist`) : c.warn(`not found. ${r.hint}`)));
-  line('Fandom', e.fandom, (r) => `${c.ok(r.wiki)}${r.mainArticle ? `, article "${r.mainArticle}"` : c.warn(', main article not found (check fandom_page)')}, ${r.topics} topics${r.missingTopics ? c.warn(` (${r.missingTopics} not found)`) : ''}`);
+  if (e.wiki) {
+    const w = e.wiki;
+    const lic = w.license ? `${w.license.name} (${w.license.reason})` : 'license unknown';
+    console.log(`  ${'Wiki license'.padEnd(14)} ${w.error ? c.bad(`could not check ${w.url}: ${w.error}`) : w.embeddable ? c.ok(lic) : c.warn(lic)}`);
+    console.log(`  ${''.padEnd(14)} ${w.embeddable ? c.ok(`articles from ${w.sitename} are shown on the site`) : c.warn(`"Read the wiki" links to ${w.url}`)}`);
+  }
+  line(e.wiki ? 'Wiki' : 'Fandom', e.fandom, (r) => `${c.ok(r.wiki)}${r.mainArticle ? `, article "${r.mainArticle}"` : c.warn(', main article not found (check fandom_page)')}, ${r.topics} topics${r.missingTopics ? c.warn(` (${r.missingTopics} not found)`) : ''}`);
 }
 
 async function confirm(question) {
@@ -367,6 +538,7 @@ export async function runAddGame(category) {
   KEY = process.env.ADMIN_API_KEY;
   isLocal = /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(API);
   SITE = isLocal ? process.env.CLIENT_URL || 'http://localhost:5173' : API;
+  fs.mkdirSync(ASSETS, { recursive: true });
   if (opts.category) fail(`--category is no longer needed: use npm run add-vgame, add-bgame or add-cgame.`);
 
   if (!KEY && !opts['dry-run']) fail('ADMIN_API_KEY is not set. Run start.bat once (it adds one to .env), or set it in the environment.');
@@ -375,6 +547,9 @@ export async function runAddGame(category) {
     const { status, json } = await admin('GET', `/games/${encodeURIComponent(opts.pull)}`);
     if (status !== 200) fail(json.error);
     checkCategory(json.game, json.game.title);
+    json.game.wiki_url ??= '';
+    const { thumbnail_url, banner_url, rulebook_url, faq_url, ...pulled } = json.game;
+    json.game = { ...pulled, thumbnail: thumbnail_url ?? '', banner: banner_url ?? '', ...(CATEGORY === 'video' ? {} : { rulebook: rulebook_url ?? '', faq: faq_url ?? '' }) };
     console.log(c.ok(`Saved ${saveDraft(json.game)}`) + c.dim(` (currently managed by: ${json.managed_by}). Edit it, then run with --file.`));
     process.exit(0);
   }
@@ -403,6 +578,14 @@ export async function runAddGame(category) {
       fail(`Could not read ${opts.file}: ${err.message}`);
     }
     checkCategory(game, opts.file);
+    if (game.wiki_url?.trim()) await customWikiStep(game, notes);
+    if (CATEGORY !== 'video') await rulebookStep(game, notes);
+    // Older drafts have "faq" as an empty list; it's a link now.
+    if (Array.isArray(game.faq)) game.faq = '';
+    if (CATEGORY !== 'video') game.unique_faq ??= [];
+    game.banner ??= '';
+    // Keep what the steps filled in (fandom_page, the TLDR) in the draft.
+    fs.writeFileSync(path.resolve(opts.file), JSON.stringify(ordered(game), null, 2) + '\n');
   } else {
     const title = opts._.join(' ').trim();
     if (!title) fail(`Give a ${LABELS[CATEGORY]} title, e.g. npm run ${CMD} -- "${EXAMPLES[CATEGORY]}"   (or --file / --pull / --refresh)`);
@@ -421,7 +604,20 @@ export async function runAddGame(category) {
     process.exit(0);
   }
 
-  const check = await admin('POST', '/games?dryRun=1', game);
+  // Local files are uploaded after the game is saved; links are stored as they are.
+  const { thumbnail, banner, rulebook, faq, ...payload } = game;
+  if (faq?.trim()) payload.faq_url = faq.trim();
+  const uploads = [];
+  // An empty banner removes any banner sent before, so the page goes back to its usual one.
+  if (banner === '') payload.banner_url = null;
+  for (const [kind, value] of [['thumbnail', thumbnail], ['banner', banner], ['rulebook', CATEGORY === 'video' ? '' : rulebook]]) {
+    const v = value?.trim();
+    if (!v) continue;
+    if (isWebLink(v) || isUploaded(v)) payload[`${kind}_url`] = v;
+    else uploads.push({ kind, ...localFile(kind, v) });
+  }
+
+  const check = await admin('POST', '/games?dryRun=1', payload);
   if (check.status === 400) {
     console.log(`\n${c.bad('The server would reject this game:')}`);
     for (const e of check.json.errors) console.log(`  ${c.bad('✖')} ${e}`);
@@ -443,7 +639,7 @@ export async function runAddGame(category) {
   }
 
   console.log(c.dim(`Sending and fetching ${CATEGORY === 'video' ? 'Steam (art, patch notes, price, DLC) / HowLongToBeat / Fandom' : 'artwork, BoardGameGeek expansions and Fandom'} data (can take a few seconds)...`));
-  const { status, json } = await admin('POST', '/games', game);
+  const { status, json } = await admin('POST', '/games', payload);
   if (status === 400) {
     for (const e of json.errors) console.log(`  ${c.bad('✖')} ${e}`);
     process.exit(1);
@@ -451,4 +647,5 @@ export async function runAddGame(category) {
   if (status >= 300) fail(json.error ?? `Server answered ${status}`);
   console.log(`\n${c.ok(`✔ ${json.status === 'created' ? 'Added' : 'Updated'}`)} ${c.b(game.title)}: ${SITE}${json.url}`);
   printEnrichment(json.enrichment);
+  for (const u of uploads) await uploadFile(game.slug, u);
 }

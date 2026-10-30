@@ -2,28 +2,30 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowSquareOut, BookOpenText, MagnifyingGlass, X } from '@phosphor-icons/react';
 import { api, useDebounced } from '../lib/api.js';
+import { wikiPath } from '../lib/format.js';
 import { Spinner } from './Common.jsx';
 
-export const wikiPath = (slug, title) =>
-  `/game/${slug}/wiki/${encodeURIComponent(title.replace(/ /g, '_')).replace(/%2F/g, '/').replace(/%3A/g, ':')}`;
+export { wikiPath };
 
-export function FandomMark({ sitename }) {
+export function FandomMark({ sitename, provider = 'Fandom' }) {
   return (
-    <span className="fandom-mark" title={`Content from ${sitename} on Fandom`}>
+    <span className="fandom-mark" title={`Content from ${sitename} on ${provider}`}>
       <span className="fandom-dot" aria-hidden="true" />
-      {sitename} · Fandom
+      {sitename} · {provider}
     </span>
   );
 }
 
+// Credits the wiki and its license (Fandom's CC BY-SA, or whatever a game's own wiki uses).
 export function Attribution({ fandom, article }) {
+  const provider = fandom.provider || 'Fandom';
   return (
     <p className="fandom-attrib">
       Text from{' '}
       <a href={article?.url || fandom.baseUrl} target="_blank" rel="noopener noreferrer">
         {article ? `“${article.title}”` : fandom.sitename}
       </a>{' '}
-      on {article ? fandom.sitename || 'Fandom' : 'Fandom'}, licensed under{' '}
+      on {article ? fandom.sitename || provider : provider}, licensed under{' '}
       <a href={fandom.license?.url || 'https://www.fandom.com/licensing'} target="_blank" rel="noopener noreferrer">
         {fandom.license?.name || 'CC BY-SA 3.0'}
       </a>
@@ -133,7 +135,7 @@ export function FandomOverview({ slug, fandom }) {
                 <BookOpenText size={16} weight="bold" aria-hidden="true" /> Read full article
               </Link>
               <a href={main.url} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
-                Open on Fandom <ArrowSquareOut size={14} aria-hidden="true" />
+                Open on {fandom.provider || 'Fandom'} <ArrowSquareOut size={14} aria-hidden="true" />
               </a>
             </div>
           </div>
@@ -147,7 +149,7 @@ export function FandomOverview({ slug, fandom }) {
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
             <span className="label">Featured pages · {topics.length}</span>
             <a className="link-btn muted" href={fandom.baseUrl} target="_blank" rel="noopener noreferrer">
-              {fandom.articles ? `${fandom.articles.toLocaleString()} articles` : 'Browse'} on Fandom <ArrowSquareOut size={12} aria-hidden="true" />
+              {fandom.articles ? `${fandom.articles.toLocaleString()} articles` : 'Browse'} on {fandom.provider || 'Fandom'} <ArrowSquareOut size={12} aria-hidden="true" />
             </a>
           </div>
           <div className="topic-grid">
@@ -176,5 +178,36 @@ export function FandomOverview({ slug, fandom }) {
 
       <Attribution fandom={fandom} />
     </div>
+  );
+}
+
+/**
+ * A game's own wiki whose license doesn't allow republishing its articles (or
+ * couldn't be checked): the Grimoire only links to it.
+ */
+export function ExternalWiki({ wiki }) {
+  return (
+    <article className="wiki-hero frame">
+      <div className="wiki-hero-body">
+        <span className="label label-gold">Community wiki</span>
+        <h3>{wiki.sitename}</h3>
+        <p className="text-2">
+          {wiki.license
+            ? <>This wiki is licensed under{' '}
+                {wiki.license.url ? (
+                  <a href={wiki.license.url} target="_blank" rel="noopener noreferrer">{wiki.license.name}</a>
+                ) : (
+                  wiki.license.name
+                )}
+                , which {wiki.license.reason || 'does not allow republishing'}, so its articles aren’t shown here. Read them on the wiki itself.</>
+            : 'This wiki’s license couldn’t be checked, so its articles aren’t shown here. Read them on the wiki itself.'}
+        </p>
+        <div className="row wrap" style={{ marginTop: 18 }}>
+          <a href={wiki.baseUrl} target="_blank" rel="noopener noreferrer" className="btn btn-gold btn-sm">
+            <BookOpenText size={16} weight="bold" aria-hidden="true" /> Read the wiki <ArrowSquareOut size={14} aria-hidden="true" />
+          </a>
+        </div>
+      </div>
+    </article>
   );
 }

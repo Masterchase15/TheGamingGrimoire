@@ -101,6 +101,20 @@ Required per category: video games need `steam_appid` (or `null` if not on Steam
 
 **Access.** Every `/api/admin` route needs either `Authorization: Bearer <ADMIN_API_KEY>` (scripts) or a signed-in account with the admin role (`npm run make-admin -- <username>`; `--revoke` to remove). The key must be at least 32 characters; `start.bat` generates one in `.env`. After 10 failed attempts an IP is locked out for 15 minutes. Every change is recorded in the `admin_audit_log` table.
 
+Every draft has a few optional fields for what the lookups can't find. Put files in the `game-assets` folder (git-ignored) and use their file name, or use a web link:
+
+| Field | Categories | What it does |
+|---|---|---|
+| `thumbnail` | all | Image (png, jpg, webp, avif) used as the game's art, in place of Steam's |
+| `banner` | all | Image shown across the top of the game page, in place of Steam's banner or the blurred thumbnail. Empty it and send again to remove it |
+| `wiki_url` | all | A wiki to use when there's no Fandom wiki. Its license decides whether its articles show on the site or are linked to |
+| `rulebook` | board, card | PDF rulebook. Adds a Rulebook button to the game page |
+| `rulebook_tldr` | board, card | Written by Claude from the rulebook when `ANTHROPIC_API_KEY` is set, and filled in by hand otherwise. Claude also fills empty Details fields. Use `--regenerate` to read the rulebook again |
+| `faq` | board, card | Link to a site with the game's FAQs. Adds an FAQ section to the game page that links there |
+| `unique_faq` | board, card | Your own questions for anything the linked FAQ doesn't cover, shown under it in the FAQ section |
+
+Fill the fields in, then send with `--file`. A draft's `rulebook_tldr` is `[{ "heading": "...", "points": ["..."] }]` and its `unique_faq` is `[{ "q": "...", "a": "..." }]`.
+
 To add games to the live site, set `ADMIN_API_KEY` on Railway, then run the script with `--api https://your-app.up.railway.app` and the same key in your local environment.
 
 ## Deploy to Railway
@@ -117,6 +131,8 @@ To add games to the live site, set `ADMIN_API_KEY` on Railway, then run the scri
    - `ADMIN_API_KEY` = a long random string, if you want to add games with the add scripts (optional)
    - `BGG_API_TOKEN` = your BoardGameGeek API token, to sync board and card game expansions (optional)
 5. Under **Settings → Networking**, generate a domain (use it for the URLs above).
+
+Uploaded thumbnails, banners and rulebooks need permanent storage: add a **Volume** to the service mounted at `/data`, and set `UPLOADS_DIR=/data/uploads`.
 
 `railway.json` builds the client (`npm run build`) and starts the server (`npm start`), which runs migrations and syncs wiki content on boot. Health check: `/api/health`.
 

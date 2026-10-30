@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowSquareOut,
+  BookBookmark,
   BookOpen,
   CaretDown,
   CaretUp,
@@ -28,8 +29,9 @@ import { SectionIcon } from '../components/Icons.jsx';
 import { Crumbs, Empty, ErrorState, Markdown, Spinner } from '../components/Common.jsx';
 import { SectionHead } from './Home.jsx';
 import { ThreadList } from './Forums.jsx';
-import { FandomMark, FandomOverview, wikiPath } from '../components/Fandom.jsx';
+import { ExternalWiki, FandomMark, FandomOverview, wikiPath } from '../components/Fandom.jsx';
 import { GameReviews } from '../components/Reviews.jsx';
+import { FaqLink, RulebookLinks, RulebookTldr, UniqueFaq } from '../components/Rulebook.jsx';
 
 export default function Game() {
   const { slug } = useParams();
@@ -68,11 +70,19 @@ export default function Game() {
   const { game, sections, hltb, stats, entry, threadCount, steam, updates, store, dlc, expansions, bgg } = data;
   const reviews = reviewSummary ?? data.reviews;
   const onSale = store?.price?.discount > 0;
-  // "Read the wiki" opens the game's Fandom article; games without one fall back to the first quick guide.
+  // "Read the wiki" opens the game's wiki article (Fandom or its own wiki), or the wiki's own site when its
+  // license doesn't allow showing it here; games without a wiki fall back to the first quick guide.
+  const externalWiki = game.wiki?.mode === 'link' ? game.wiki.url : null;
   const wikiLink = game.fandom_page ? wikiPath(game.slug, game.fandom_page) : sections[0] && `/game/${game.slug}/${sections[0].slug}`;
+  const embedded = fandom?.mode !== 'link' ? fandom : null;
   const cat = CATEGORIES[game.category];
   const totalMembers = Object.values(stats).reduce((a, b) => a + b, 0);
   const showPatches = game.category === 'video';
+  const tabletop = game.category !== 'video';
+  const rulebook = tabletop ? game.rulebook_url : null;
+  const tldr = tabletop ? game.rulebook_tldr ?? [] : [];
+  const faq = tabletop ? game.faq_url : null;
+  const uniqueFaq = tabletop ? game.unique_faq ?? [] : [];
 
   function openEditor() {
     if (!session?.user) navigate(`/login?next=/game/${slug}`);
@@ -95,7 +105,9 @@ export default function Game() {
     showPatches && ['patch-notes', 'Patch notes', updates.length],
     dlc && ['dlc', 'DLC', dlc.length],
     expansions && ['expansions', 'Expansions', expansions.length],
-    ['wiki', 'Wiki', fandom ? fandom.topics.length + sections.length : sections.length],
+    (tldr.length > 0 || rulebook) && ['tldr', 'Rulebook'],
+    (faq || uniqueFaq.length > 0) && ['faq', 'FAQ'],
+    ['wiki', 'Wiki', embedded ? embedded.topics.length + sections.length : sections.length],
     ['reviews', 'Reviews', reviews.count],
     ['discussions', 'Discussions', threadCount],
   ].filter(Boolean);
@@ -149,10 +161,21 @@ export default function Game() {
                   <Plus size={18} weight="bold" aria-hidden="true" /> Add to library
                 </button>
               )}
-              {wikiLink && (
-                <Link className="btn" to={wikiLink}>
-                  <BookOpen size={18} weight="bold" aria-hidden="true" /> Read the wiki
-                </Link>
+              {externalWiki ? (
+                <a className="btn" href={externalWiki} target="_blank" rel="noopener noreferrer">
+                  <BookOpen size={18} weight="bold" aria-hidden="true" /> Read the wiki <ArrowSquareOut size={14} aria-hidden="true" />
+                </a>
+              ) : (
+                wikiLink && (
+                  <Link className="btn" to={wikiLink}>
+                    <BookOpen size={18} weight="bold" aria-hidden="true" /> Read the wiki
+                  </Link>
+                )
+              )}
+              {rulebook && (
+                <a className="btn btn-ghost" href={rulebook} target="_blank" rel="noopener noreferrer">
+                  <BookBookmark size={18} weight="bold" aria-hidden="true" /> Rulebook
+                </a>
               )}
               {steam && (
                 <a className="btn btn-ghost" href={steam.storeUrl} target="_blank" rel="noreferrer noopener">
@@ -255,21 +278,48 @@ export default function Game() {
               </section>
             )}
 
+            {(tldr.length > 0 || rulebook) && (
+              <section id="tldr" className="section">
+                <SectionHead index={sectionIndex('tldr')} kicker="TLDR" title="Rulebook" />
+                {tldr.length > 0 && <RulebookTldr tldr={tldr} />}
+                {rulebook && (
+                  <div style={{ marginTop: tldr.length ? 20 : 0 }}>
+                    <RulebookLinks url={rulebook} />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {(faq || uniqueFaq.length > 0) && (
+              <section id="faq" className="section">
+                <SectionHead index={sectionIndex('faq')} kicker="Rulebook" title="FAQ" />
+                {faq && <FaqLink url={faq} title={game.title} />}
+                {uniqueFaq.length > 0 && (
+                  <div style={{ marginTop: faq ? 28 : 0 }}>
+                    {faq && <span className="label" style={{ display: 'block', marginBottom: 12 }}>Grimoire questions · {uniqueFaq.length}</span>}
+                    <UniqueFaq faq={uniqueFaq} />
+                  </div>
+                )}
+              </section>
+            )}
+
             <section id="wiki" className="section">
               <SectionHead
                 index={sectionIndex('wiki')}
                 kicker="Grimoire"
                 title="Wiki"
-                link={fandom && <FandomMark sitename={fandom.sitename} />}
+                link={fandom && <FandomMark sitename={fandom.sitename} provider={fandom.provider} />}
               />
-              {fandomReq.loading && game.fandom_wiki ? (
+              {fandomReq.loading && game.wiki ? (
                 <div className="skeleton" style={{ height: 260 }} />
+              ) : fandom?.mode === 'link' ? (
+                <ExternalWiki wiki={fandom} />
               ) : fandom ? (
                 <FandomOverview slug={game.slug} fandom={fandom} />
-              ) : fandomReq.error && game.fandom_wiki ? (
-                <p className="callout">The Fandom wiki couldn’t be reached right now. The quick guides below are still available.</p>
+              ) : fandomReq.error && game.wiki ? (
+                <p className="callout">The wiki couldn’t be reached right now. The quick guides below are still available.</p>
               ) : null}
-              {sections.length > 0 && (fandom || (fandomReq.error && game.fandom_wiki)) && (
+              {sections.length > 0 && (fandom || (fandomReq.error && game.wiki)) && (
                 <div className="row" style={{ justifyContent: 'space-between', margin: '40px 0 14px' }}>
                   <span className="label">Grimoire quick guides · {sections.length}</span>
                   <span className="label">Written for TheGamingGrimoire</span>

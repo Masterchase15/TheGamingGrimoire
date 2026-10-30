@@ -6,7 +6,8 @@ import { statusesFor } from '../lib/statuses.js';
 import { bggUrl } from '../lib/bgg.js';
 import { plainExcerpt, steamStoreUrl } from '../lib/steam.js';
 import { refreshGameNewsIfStale, refreshStoreIfStale } from '../lib/steamSync.js';
-import { getArticle, getOverview, searchWiki } from '../lib/fandom.js';
+import { externalWikiLink, getArticle, getOverview, searchWiki, sourceFor } from '../lib/fandom.js';
+import { ensureWikiInfo } from '../lib/wikiSync.js';
 
 const router = Router();
 
@@ -100,7 +101,7 @@ function uniqueExpansions(rows) {
 router.get('/:slug', async (req, res) => {
   const { rows } = await query(`SELECT * FROM games WHERE slug = $1`, [req.params.slug]);
   if (!rows[0]) throw new HttpError(404, 'Game not found.');
-  const game = await ensureHltb(rows[0]);
+  const game = await ensureWikiInfo(await ensureHltb(rows[0]));
 
   refreshGameNewsIfStale(game);
   refreshStoreIfStale(game);
@@ -152,13 +153,17 @@ router.get('/:slug', async (req, res) => {
   const {
     hltb_query, hltb_id, hltb_name, hltb_main, hltb_extra, hltb_complete, hltb_checked_at,
     steam_assets_checked_at, news_checked_at, fandom_topics, fandom_page, patch_exclude, store_checked_at, bgg_checked_at,
-    price_currency, price_initial, price_final, price_discount, is_free, ...publicGame
+    price_currency, price_initial, price_final, price_discount, is_free, wiki_info, ...publicGame
   } = game;
-  // The Fandom article "Read the wiki" opens; defaults to the game's own title on its wiki.
-  const fandomPage = game.fandom_wiki ? fandom_page || game.title : null;
+  // The wiki article "Read the wiki" opens; defaults to the game's own title on its wiki.
+  // A wiki_url whose license doesn't allow republishing is linked to instead.
+  const source = sourceFor(game);
+  const link = externalWikiLink(game);
+  const fandomPage = source ? fandom_page || game.title : null;
+  const wiki = source ? { mode: 'embed', page: fandomPage } : link ? { mode: 'link', url: link.baseUrl, sitename: link.sitename } : null;
 
   res.json({
-    game: { ...publicGame, fandom_page: fandomPage, statuses: statusesFor(game) },
+    game: { ...publicGame, fandom_page: fandomPage, wiki, statuses: statusesFor(game) },
     sections: sections.rows,
     hltb: hltbPayload(game),
     stats: Object.fromEntries(statusCounts.rows.map((r) => [r.status, r.count])),
@@ -189,26 +194,34 @@ router.get('/:slug', async (req, res) => {
   });
 });
 
-async function fandomGame(slug) {
+// A game and the wiki its articles come from (null when it has none, or only links out to one).
+async function wikiGame(slug) {
   const { rows } = await query(
-    `SELECT slug, fandom_wiki, fandom_page, fandom_topics FROM games WHERE slug = $1`,
+    `SELECT id, slug, title, fandom_wiki, fandom_page, fandom_topics, wiki_url, wiki_info FROM games WHERE slug = $1`,
     [slug]
   );
   if (!rows[0]) throw new HttpError(404, 'Game not found.');
-  if (!rows[0].fandom_wiki) throw new HttpError(404, 'This game has no Fandom wiki.');
-  return rows[0];
+  const game = await ensureWikiInfo(rows[0]);
+  return { game, source: sourceFor(game) };
+}
+
+async function wikiSource(slug) {
+  const { source } = await wikiGame(slug);
+  if (!source) throw new HttpError(404, 'This game has no wiki that can be shown here.');
+  return source;
 }
 
 const fandomFailure = (err) =>
-  err instanceof HttpError ? err : new HttpError(502, 'The Fandom wiki could not be reached. Try again in a moment.');
+  err instanceof HttpError ? err : new HttpError(502, 'The wiki could not be reached. Try again in a moment.');
 
-// Fandom overview: main article summary + featured topics. Returns { fandom: null } when the game has no wiki.
+// Wiki overview: main article summary + featured topics (mode "embed"), or, for a
+// wiki whose license doesn't allow republishing, where to read it (mode "link").
+// Returns { fandom: null } when the game has no wiki.
 router.get('/:slug/fandom', async (req, res) => {
-  const { rows } = await query(`SELECT fandom_wiki, fandom_page, fandom_topics FROM games WHERE slug = $1`, [req.params.slug]);
-  if (!rows[0]) throw new HttpError(404, 'Game not found.');
-  if (!rows[0].fandom_wiki) return res.json({ fandom: null });
+  const { game, source } = await wikiGame(req.params.slug);
+  if (!source) return res.json({ fandom: externalWikiLink(game) });
   try {
-    const fandom = await getOverview({ wiki: rows[0].fandom_wiki, page: rows[0].fandom_page, topics: rows[0].fandom_topics });
+    const fandom = await getOverview(source, { page: game.fandom_page, topics: game.fandom_topics });
     res.json({ fandom });
   } catch (err) {
     console.warn(`[fandom] overview ${req.params.slug}: ${err.message}`);
@@ -219,10 +232,10 @@ router.get('/:slug/fandom', async (req, res) => {
 router.get('/:slug/fandom/page', async (req, res) => {
   const title = String(req.query.title || '').trim();
   if (!title) throw new HttpError(400, 'Missing page title.');
-  const game = await fandomGame(req.params.slug);
+  const source = await wikiSource(req.params.slug);
   try {
-    const article = await getArticle(game.fandom_wiki, title, game.slug);
-    res.json({ article, wiki: game.fandom_wiki });
+    const article = await getArticle(source, title, req.params.slug);
+    res.json({ article, wiki: source.id });
   } catch (err) {
     if (!(err instanceof HttpError)) console.warn(`[fandom] page ${title}: ${err.message}`);
     throw fandomFailure(err);
@@ -232,9 +245,9 @@ router.get('/:slug/fandom/page', async (req, res) => {
 router.get('/:slug/fandom/search', async (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 100);
   if (!q) return res.json({ results: [] });
-  const game = await fandomGame(req.params.slug);
+  const source = await wikiSource(req.params.slug);
   try {
-    res.json({ results: await searchWiki(game.fandom_wiki, q) });
+    res.json({ results: await searchWiki(source, q) });
   } catch (err) {
     throw fandomFailure(err);
   }

@@ -1,7 +1,7 @@
 import { Link, useSearchParams } from 'react-router-dom';
-import { BookOpen, MagnifyingGlass, TextAa } from '@phosphor-icons/react';
+import { BookOpen, BookOpenText, MagnifyingGlass, TextAa } from '@phosphor-icons/react';
 import { useApi } from '../lib/api.js';
-import { CATEGORIES } from '../lib/format.js';
+import { CATEGORIES, wikiPath } from '../lib/format.js';
 import GameCard from '../components/GameCard.jsx';
 import SearchBox from '../components/SearchBox.jsx';
 import { Empty, Highlight, Spinner } from '../components/Common.jsx';
@@ -13,11 +13,12 @@ export default function Search() {
   const category = params.get('category') ?? '';
   const scope = category ? `&category=${category}` : '';
   const { data, loading } = useApi(q ? `/search?q=${encodeURIComponent(q)}&limit=25${scope}` : null);
-  const total = data ? data.games.length + data.pages.length + data.terms.length : 0;
+  const articles = data?.articles ?? [];
+  const total = data ? data.games.length + articles.length + data.pages.length + data.terms.length : 0;
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head has-search">
         <div className="container">
           <span className="eyebrow">
             <b>?</b> <i>/</i> Search
@@ -56,7 +57,7 @@ export default function Search() {
 
         {!q ? (
           <Empty icon={MagnifyingGlass} title="Search the grimoire">
-            Find games, wiki pages and keyword definitions.
+            Find games, wiki articles, quick guides and keyword definitions.
           </Empty>
         ) : loading ? (
           <Spinner />
@@ -76,16 +77,38 @@ export default function Search() {
                 </div>
               </section>
             )}
+            {articles.length > 0 && (
+              <section className="section">
+                <SectionHead index="02" kicker={`${articles.length} found`} title="Wiki articles" />
+                <div className="wiki-list">
+                  {articles.map((a) => (
+                    <Link key={`${a.game_slug}/${a.title}`} to={wikiPath(a.game_slug, a.title)} className="wiki-item">
+                      <BookOpenText size={18} weight="bold" className="gold" aria-hidden="true" style={{ flexShrink: 0, marginTop: 3 }} />
+                      <div>
+                        <h3>
+                          <span>
+                            <Highlight text={a.title} query={q} />
+                          </span>
+                        </h3>
+                        <p>{a.game_title} wiki</p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
             {data.pages.length > 0 && (
               <section className="section">
-                <SectionHead index="02" kicker={`${data.pages.length} found`} title="Wiki pages" />
+                <SectionHead index="03" kicker={`${data.pages.length} found`} title="Quick guides" />
                 <div className="wiki-list">
                   {data.pages.map((p) => (
                     <Link key={`${p.game_slug}/${p.slug}`} to={`/game/${p.game_slug}/${p.slug}`} className="wiki-item">
                       <BookOpen size={18} weight="bold" className="gold" aria-hidden="true" style={{ flexShrink: 0, marginTop: 3 }} />
                       <div>
                         <h3>
-                          <Highlight text={p.title} query={q} />
+                          <span>
+                            <Highlight text={p.title} query={q} />
+                          </span>
                         </h3>
                         <p>{p.game_title}</p>
                       </div>
@@ -96,7 +119,7 @@ export default function Search() {
             )}
             {data.terms.length > 0 && (
               <section className="section">
-                <SectionHead index="03" kicker={`${data.terms.length} found`} title="Keywords & terms" />
+                <SectionHead index="04" kicker={`${data.terms.length} found`} title="Keywords & terms" />
                 <div className="glossary-list">
                   {data.terms.map((t) => (
                     <Link

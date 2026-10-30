@@ -24,7 +24,7 @@ export async function syncAssets({ force = false, gameId = null } = {}) {
     for (const r of batch) {
       const a = assets.get(r.steam_appid);
       await query(
-        `UPDATE games SET capsule_url = COALESCE($2, capsule_url), hero_url = COALESCE($3, hero_url),
+        `UPDATE games SET capsule_url = COALESCE(thumbnail_url, $2, capsule_url), hero_url = COALESCE(banner_url, $3, hero_url),
            header_url = COALESCE($4, header_url), steam_assets_checked_at = now() WHERE id = $1`,
         [r.id, a?.capsule ?? null, a?.hero ?? null, a?.header ?? null]
       );

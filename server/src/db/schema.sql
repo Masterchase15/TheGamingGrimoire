@@ -234,3 +234,44 @@ CREATE TABLE IF NOT EXISTS game_expansions (
 );
 CREATE INDEX IF NOT EXISTS game_expansions_game_idx ON game_expansions (game_id);
 CREATE UNIQUE INDEX IF NOT EXISTS game_expansions_bgg_idx ON game_expansions (game_id, bgg_id) WHERE source = 'bgg';
+
+-- A game's own wiki when it has no Fandom wiki (wiki_url, set from the add-game
+-- scripts). wiki_info holds what the server found there: its MediaWiki API, its
+-- license, and whether that license lets us republish it ("embeddable").
+ALTER TABLE games ADD COLUMN IF NOT EXISTS wiki_url TEXT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS wiki_info JSONB;
+
+-- Article titles of every game's wiki, so site-wide search finds wiki pages
+-- (characters, items, places...). Keyed by wiki, not game: games can share a wiki.
+CREATE TABLE IF NOT EXISTS wiki_titles (
+  wiki   TEXT NOT NULL,
+  title  TEXT NOT NULL,
+  PRIMARY KEY (wiki, title)
+);
+-- Lowercased, accent-free title (so "alvarez" finds "Judy Álvarez"); filled by lib/wikiSync.js.
+ALTER TABLE wiki_titles ADD COLUMN IF NOT EXISTS norm TEXT;
+CREATE TABLE IF NOT EXISTS wiki_index_state (
+  wiki        TEXT PRIMARY KEY,
+  titles      INT NOT NULL DEFAULT 0,
+  error       TEXT,
+  indexed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Trigram index for "contains" searches; skipped where pg_trgm isn't installed.
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+  DROP INDEX IF EXISTS wiki_titles_trgm_idx;
+  CREATE INDEX IF NOT EXISTS wiki_titles_norm_trgm_idx ON wiki_titles USING gin (norm gin_trgm_ops);
+EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'pg_trgm unavailable: wiki title search will scan';
+END $$;
+
+-- Files and rulebook content sent with a game (see the add-game scripts). thumbnail_url
+-- replaces the game's art; rulebook_tldr is [{ heading, points[] }]; faq_url links to a site with the game's FAQs.
+ALTER TABLE games ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;
+-- Replaces the banner across the top of the game page.
+ALTER TABLE games ADD COLUMN IF NOT EXISTS banner_url TEXT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS rulebook_url TEXT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS rulebook_tldr JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE games ADD COLUMN IF NOT EXISTS faq_url TEXT;
+ALTER TABLE games DROP COLUMN IF EXISTS faq;
+-- Questions the linked FAQ doesn't cover, written for the site: [{ q, a }].
+ALTER TABLE games ADD COLUMN IF NOT EXISTS unique_faq JSONB NOT NULL DEFAULT '[]';
