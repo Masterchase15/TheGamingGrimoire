@@ -269,7 +269,16 @@ END $$;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;
 -- Replaces the banner across the top of the game page.
 ALTER TABLE games ADD COLUMN IF NOT EXISTS banner_url TEXT;
-ALTER TABLE games ADD COLUMN IF NOT EXISTS rulebook_url TEXT;
+-- A game's rulebooks in order: [{ name, url }]. The one named "Base Game" is the page's main rulebook.
+ALTER TABLE games ADD COLUMN IF NOT EXISTS rulebooks JSONB NOT NULL DEFAULT '[]';
+-- Games used to have one rulebook; it becomes their Base Game rulebook.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'games' AND column_name = 'rulebook_url') THEN
+    UPDATE games SET rulebooks = jsonb_build_array(jsonb_build_object('name', 'Base Game', 'url', rulebook_url))
+      WHERE rulebook_url IS NOT NULL AND rulebooks = '[]';
+    ALTER TABLE games DROP COLUMN rulebook_url;
+  END IF;
+END $$;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS rulebook_tldr JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE games ADD COLUMN IF NOT EXISTS faq_url TEXT;
 ALTER TABLE games DROP COLUMN IF EXISTS faq;

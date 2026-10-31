@@ -4,6 +4,7 @@
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const FANDOM_WIKI = /^[a-z0-9][a-z0-9-]{0,60}$/;
 const CATEGORIES = ['video', 'board', 'card'];
+const FILE_LINK = /^(https?:\/\/|\/api\/files\/)\S+$/i; // a web link, or a file already uploaded to the site
 
 const text = (max) => ({ kind: 'text', max });
 const FIELDS = {
@@ -34,7 +35,7 @@ const FIELDS = {
   wiki_url: { kind: 'url' },
   thumbnail_url: { kind: 'file' },
   banner_url: { kind: 'file' },
-  rulebook_url: { kind: 'file' },
+  rulebooks: { kind: 'rulebooks' },
   rulebook_tldr: { kind: 'tldr' },
   faq_url: { kind: 'url' },
   unique_faq: { kind: 'faq' },
@@ -89,10 +90,18 @@ function checkField(name, rule, v, errors) {
       if (typeof v !== 'string' || !/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v.trim()) || v.length > 500) return bad('must be a full web link, e.g. "https://en.uesp.net/wiki/Main_Page"');
       return v.trim();
     case 'file':
-      // A web link, or a file already uploaded to the site.
       if (v === '') return null;
-      if (typeof v !== 'string' || !/^(https?:\/\/|\/api\/files\/)\S+$/i.test(v.trim()) || v.length > 500) return bad('must be an http(s) link');
+      if (typeof v !== 'string' || !FILE_LINK.test(v.trim()) || v.length > 500) return bad('must be an http(s) link');
       return v.trim();
+    case 'rulebooks': {
+      if (!Array.isArray(v) || v.length > 20) return bad('must be a list of rulebooks (at most 20)');
+      if (v.some((r) => typeof r?.name !== 'string' || !r.name.trim() || r.name.length > 80)) return bad('each rulebook needs a "name" of up to 80 characters');
+      // No url yet means the file is uploaded next.
+      if (v.some((r) => r.url && (typeof r.url !== 'string' || !FILE_LINK.test(r.url.trim()) || r.url.length > 500))) return bad('each rulebook "url" must be an http(s) link');
+      const names = v.map((r) => r.name.trim().toLowerCase());
+      if (new Set(names).size < names.length) return bad('each rulebook needs its own name');
+      return v.map((r) => ({ name: r.name.trim(), url: r.url?.trim() || null }));
+    }
     case 'tldr':
       if (!Array.isArray(v) || v.length > 30) return bad('must be a list of sections (at most 30)');
       if (v.some((s) => typeof s?.heading !== 'string' || !s.heading.trim() || !Array.isArray(s.points) || !s.points.length || s.points.some((p) => typeof p !== 'string' || !p.trim()))) {
@@ -197,6 +206,8 @@ export function validateGame(input, existing = null) {
     else if (existing) game[name] = existing[name];
   }
   for (const f of ['slug', 'title', 'category']) if (game[f] == null && !(f in input)) errors.push(`${f}: required`);
+  // A rulebook that's about to be uploaded keeps its current link until the upload replaces it.
+  for (const r of game.rulebooks ?? []) r.url ??= existing?.rulebooks?.find((old) => old.name === r.name)?.url ?? null;
 
   for (const f of REQUIRED[game.category] ?? []) {
     // steam_appid may be an explicit null ("not on Steam"); everything else needs a value.
@@ -222,7 +233,7 @@ export function validateGame(input, existing = null) {
   if (!game.description) warnings.push('No description: the game page will have no About text.');
   if (game.wiki_url && game.fandom_wiki) warnings.push('wiki_url is set, so the game uses that wiki and fandom_wiki is ignored.');
   else if (!game.fandom_wiki && !game.wiki_url) warnings.push('No fandom_wiki or wiki_url: the page will not have a wiki section.');
-  if (game.category === 'video' && (game.rulebook_url || game.rulebook_tldr?.length || game.faq_url || game.unique_faq?.length)) warnings.push('Rulebooks, TLDRs and FAQs only show on board and card games.');
+  if (game.category === 'video' && (game.rulebooks?.length || game.rulebook_tldr?.length || game.faq_url || game.unique_faq?.length)) warnings.push('Rulebooks, TLDRs and FAQs only show on board and card games.');
   if (game.category === 'video' && game.steam_appid == null) warnings.push('Not on Steam: the page will use a generated poster and show no patch notes.');
   if (game.category !== 'video' && game.steam_appid == null) warnings.push('No steam_appid: the page will use a generated poster instead of Steam art.');
   if (game.category === 'video' && game.bgg_id != null) warnings.push('bgg_id is only used for board and card games.');

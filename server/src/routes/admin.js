@@ -182,11 +182,12 @@ router.post('/games', async (req, res) => {
 const UPLOADS = {
   thumbnail: { column: 'thumbnail_url', shows: 'capsule_url', types: { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif' } },
   banner: { column: 'banner_url', shows: 'hero_url', types: { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif' } },
-  rulebook: { column: 'rulebook_url', types: { 'application/pdf': 'pdf' } },
+  rulebook: { types: { 'application/pdf': 'pdf' } },
 };
 
 // Stores a game's thumbnail, banner or rulebook in UPLOADS_DIR (the body is the file itself)
 // and points the game at it. Sent by the add-game scripts after the game is saved.
+// A rulebook also says which one it is with ?name=.
 router.put('/games/:slug/files/:kind', express.raw({ type: () => true, limit: '60mb' }), async (req, res) => {
   const upload = UPLOADS[req.params.kind];
   if (!upload) throw new HttpError(404, 'Unknown file kind.');
@@ -194,22 +195,31 @@ router.put('/games/:slug/files/:kind', express.raw({ type: () => true, limit: '6
   if (!ext) throw new HttpError(400, `Unsupported file type. Use ${Object.values(upload.types).join(', ')}.`);
   if (!req.body?.length) throw new HttpError(400, 'The file is empty.');
   if (ext === 'pdf' && req.body.subarray(0, 5).toString() !== '%PDF-') throw new HttpError(400, 'That file is not a PDF.');
-  const { rows: [g] } = await query(`SELECT id, slug, category FROM games WHERE slug = $1`, [req.params.slug]);
+  const { rows: [g] } = await query(`SELECT id, slug, category, rulebooks FROM games WHERE slug = $1`, [req.params.slug]);
   if (!g) throw new HttpError(404, 'Game not found.');
-  if (req.params.kind === 'rulebook' && g.category === 'video') throw new HttpError(400, 'Only board and card games have rulebooks.');
+  const isRulebook = req.params.kind === 'rulebook';
+  if (isRulebook && g.category === 'video') throw new HttpError(400, 'Only board and card games have rulebooks.');
+  const rulebookName = isRulebook ? String(req.query.name ?? '').trim() : null;
+  if (isRulebook && !rulebookName) throw new HttpError(400, 'Say which rulebook this is with ?name=.');
 
   const dir = path.join(UPLOADS_DIR, g.slug);
   await fs.mkdir(dir, { recursive: true });
   const hash = crypto.createHash('sha256').update(req.body).digest('hex').slice(0, 12);
   const name = `${req.params.kind}-${hash}.${ext}`;
   await fs.writeFile(path.join(dir, name), req.body);
-  for (const old of await fs.readdir(dir)) {
-    if (old.startsWith(`${req.params.kind}-`) && old !== name) await fs.rm(path.join(dir, old));
-  }
 
   const url = `/api/files/${g.slug}/${name}`;
-  await query(`UPDATE games SET ${upload.column} = $2 WHERE id = $1`, [g.id, url]);
-  if (upload.shows) await query(`UPDATE games SET ${upload.shows} = $2 WHERE id = $1`, [g.id, url]);
+  const rulebooks = g.rulebooks.some((r) => r.name === rulebookName)
+    ? g.rulebooks.map((r) => (r.name === rulebookName ? { ...r, url } : r))
+    : [...g.rulebooks, { name: rulebookName, url }];
+  // Other rulebooks still use their files; anything else of this kind has been replaced.
+  const keep = new Set([name, ...(isRulebook ? rulebooks.map((r) => r.url?.split('/').pop()) : [])]);
+  for (const old of await fs.readdir(dir)) {
+    if (old.startsWith(`${req.params.kind}-`) && !keep.has(old)) await fs.rm(path.join(dir, old));
+  }
+
+  if (isRulebook) await query(`UPDATE games SET rulebooks = $2 WHERE id = $1`, [g.id, JSON.stringify(rulebooks)]);
+  else await query(`UPDATE games SET ${upload.column} = $2, ${upload.shows} = $2 WHERE id = $1`, [g.id, url]);
   await audit({ query }, req, 'upload', g.slug, { kind: req.params.kind, name, bytes: req.body.length });
   res.json({ url, bytes: req.body.length });
 });

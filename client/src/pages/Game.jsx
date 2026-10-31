@@ -79,7 +79,8 @@ export default function Game() {
   const totalMembers = Object.values(stats).reduce((a, b) => a + b, 0);
   const showPatches = game.category === 'video';
   const tabletop = game.category !== 'video';
-  const rulebook = tabletop ? game.rulebook_url : null;
+  const rulebooks = tabletop ? (game.rulebooks ?? []).filter((r) => r.url) : [];
+  const mainRulebook = rulebooks.find((r) => /^base game$/i.test(r.name)) ?? rulebooks[0];
   const tldr = tabletop ? game.rulebook_tldr ?? [] : [];
   const faq = tabletop ? game.faq_url : null;
   const uniqueFaq = tabletop ? game.unique_faq ?? [] : [];
@@ -105,7 +106,7 @@ export default function Game() {
     showPatches && ['patch-notes', 'Patch notes', updates.length],
     dlc && ['dlc', 'DLC', dlc.length],
     expansions && ['expansions', 'Expansions', expansions.length],
-    (tldr.length > 0 || rulebook) && ['tldr', 'Rulebook'],
+    (tldr.length > 0 || mainRulebook) && ['tldr', 'Rulebooks'],
     (faq || uniqueFaq.length > 0) && ['faq', 'FAQ'],
     ['wiki', 'Wiki', embedded ? embedded.topics.length + sections.length : sections.length],
     ['reviews', 'Reviews', reviews.count],
@@ -172,8 +173,8 @@ export default function Game() {
                   </Link>
                 )
               )}
-              {rulebook && (
-                <a className="btn btn-ghost" href={rulebook} target="_blank" rel="noopener noreferrer">
+              {mainRulebook && (
+                <a className="btn btn-ghost" href={mainRulebook.url} target="_blank" rel="noopener noreferrer">
                   <BookBookmark size={18} weight="bold" aria-hidden="true" /> Rulebook
                 </a>
               )}
@@ -278,13 +279,13 @@ export default function Game() {
               </section>
             )}
 
-            {(tldr.length > 0 || rulebook) && (
+            {(tldr.length > 0 || mainRulebook) && (
               <section id="tldr" className="section">
-                <SectionHead index={sectionIndex('tldr')} kicker="TLDR" title="Rulebook" />
-                {tldr.length > 0 && <RulebookTldr tldr={tldr} />}
-                {rulebook && (
-                  <div style={{ marginTop: tldr.length ? 20 : 0 }}>
-                    <RulebookLinks url={rulebook} />
+                <SectionHead index={sectionIndex('tldr')} kicker="TLDR" title="Rulebooks" />
+                {mainRulebook && <RulebookLinks rulebooks={rulebooks} />}
+                {tldr.length > 0 && (
+                  <div style={{ marginTop: mainRulebook ? 20 : 0 }}>
+                    <RulebookTldr tldr={tldr} />
                   </div>
                 )}
               </section>

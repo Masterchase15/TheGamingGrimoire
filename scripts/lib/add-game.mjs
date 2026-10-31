@@ -11,8 +11,10 @@
 // Files go in the game-assets folder. In a draft, "thumbnail" and "banner" (all categories) and
 // "rulebook" (board and card games) hold a file name from that folder, or a web link,
 // and "faq" (board and card games) holds a link to a site with the game's FAQs.
+// A game with several rulebooks lists them: "rulebook": [{ "name": "Base Game", "file": "..." }].
+// The one named "Base Game" (or else the first) is the game's main rulebook.
 // "unique_faq" lists questions that site doesn't cover: [{ "q": "...", "a": "..." }].
-// When a game with a rulebook has no "rulebook_tldr" yet, Claude reads the PDF and
+// When a game with a rulebook has no "rulebook_tldr" yet, Claude reads the main PDF and
 // writes it, and fills empty Details fields (needs ANTHROPIC_API_KEY in .env; see
 // rulebook.mjs). The results are saved in the draft, so you can edit them.
 // After saving, the server itself fetches Steam art (any game with a steam_appid),
@@ -119,11 +121,11 @@ async function admin(method, route, body) {
   return { status: res.status, json };
 }
 
-async function uploadFile(slug, { kind, file, type }) {
+async function uploadFile(slug, { kind, file, type, name }) {
   const body = fs.readFileSync(file);
   let res;
   try {
-    res = await fetch(`${API}/api/admin/games/${slug}/files/${kind}`, {
+    res = await fetch(`${API}/api/admin/games/${slug}/files/${kind}${name ? `?name=${encodeURIComponent(name)}` : ''}`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': type },
       body,
@@ -134,7 +136,7 @@ async function uploadFile(slug, { kind, file, type }) {
   }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) fail(`Upload of ${path.basename(file)} failed: ${json.error ?? res.status}`);
-  console.log(`  ${(kind[0].toUpperCase() + kind.slice(1)).padEnd(14)} ${c.ok(`uploaded ${path.basename(file)}`)} ${c.dim(`(${(body.length / 1048576).toFixed(1)} MB)`)}`);
+  console.log(`  ${(kind[0].toUpperCase() + kind.slice(1)).padEnd(14)} ${c.ok(`uploaded ${path.basename(file)}`)} ${c.dim(`(${name ? `${name}, ` : ''}${(body.length / 1048576).toFixed(1)} MB)`)}`);
 }
 
 // ---------- lookups ----------
@@ -384,15 +386,26 @@ async function loadPdf(value) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-// Board and card games: Claude reads the rulebook for the TLDR and Details. Skipped
+// A draft's "rulebook" as a list: one file is the Base Game rulebook.
+function rulebookList(g) {
+  const value = g.rulebook ?? '';
+  if (typeof value === 'string') return value.trim() ? [{ name: 'Base Game', file: value.trim() }] : [];
+  if (!Array.isArray(value) || value.some((r) => typeof r?.name !== 'string' || !r.name.trim() || typeof r.file !== 'string' || !r.file.trim())) {
+    fail('"rulebook": use one file name, or a list of { "name": "...", "file": "..." }.');
+  }
+  return value.map((r) => ({ name: r.name.trim(), file: r.file.trim() }));
+}
+
+// Board and card games: Claude reads the main rulebook for the TLDR and Details. Skipped
 // when the draft already has them, so edits (and the cost of reading it) aren't repeated.
 async function rulebookStep(g, notes) {
-  const rulebook = g.rulebook?.trim();
-  if (!rulebook) return;
+  const list = rulebookList(g);
+  const main = list.find((r) => /^base game$/i.test(r.name)) ?? list[0];
+  if (!main) return;
   if (g.rulebook_tldr?.length && !opts.regenerate) return;
-  process.stdout.write('Reading the rulebook with Claude (can take a minute or two)... ');
+  process.stdout.write(`Reading the ${list.length > 1 ? `"${main.name}" ` : ''}rulebook with Claude (can take a minute or two)... `);
   try {
-    const pdf = await loadPdf(rulebook);
+    const pdf = await loadPdf(main.file);
     if (pdf.length > MAX_PDF_BYTES) throw new Error(`the PDF is ${(pdf.length / 1048576).toFixed(0)} MB; the limit is ${MAX_PDF_BYTES / 1048576} MB`);
     const { readRulebook } = await import('./rulebook.mjs');
     const { tldr, details, usage } = await readRulebook(pdf, g.title);
@@ -489,7 +502,7 @@ function preview(g) {
   }
   if (g.thumbnail) show('thumbnail', g.thumbnail);
   if (g.banner) show('banner', g.banner);
-  if (g.category !== 'video' && g.rulebook) show('rulebook', `${g.rulebook}  ${c.dim(`${g.rulebook_tldr?.length ?? 0} TLDR sections`)}`);
+  if (g.category !== 'video' && g.rulebook?.length) show('rulebook', `${rulebookList(g).map((r) => `${r.name} (${r.file})`).join(', ')}  ${c.dim(`${g.rulebook_tldr?.length ?? 0} TLDR sections`)}`);
   if (g.category !== 'video' && typeof g.faq === 'string' && g.faq) show('faq', g.faq);
   if (g.category !== 'video' && g.unique_faq?.length) show('unique_faq', `${g.unique_faq.length} questions`);
   if (g.wiki_url) show('wiki', `${g.wiki_url}${g.fandom_page ? ` → ${g.fandom_page}` : ''}`);
@@ -548,8 +561,9 @@ export async function runAddGame(category) {
     if (status !== 200) fail(json.error);
     checkCategory(json.game, json.game.title);
     json.game.wiki_url ??= '';
-    const { thumbnail_url, banner_url, rulebook_url, faq_url, ...pulled } = json.game;
-    json.game = { ...pulled, thumbnail: thumbnail_url ?? '', banner: banner_url ?? '', ...(CATEGORY === 'video' ? {} : { rulebook: rulebook_url ?? '', faq: faq_url ?? '' }) };
+    const { thumbnail_url, banner_url, rulebooks, faq_url, ...pulled } = json.game;
+    const rulebook = rulebooks.map((r) => ({ name: r.name, file: r.url ?? '' }));
+    json.game = { ...pulled, thumbnail: thumbnail_url ?? '', banner: banner_url ?? '', ...(CATEGORY === 'video' ? {} : { rulebook, faq: faq_url ?? '' }) };
     console.log(c.ok(`Saved ${saveDraft(json.game)}`) + c.dim(` (currently managed by: ${json.managed_by}). Edit it, then run with --file.`));
     process.exit(0);
   }
@@ -610,11 +624,19 @@ export async function runAddGame(category) {
   const uploads = [];
   // An empty banner removes any banner sent before, so the page goes back to its usual one.
   if (banner === '') payload.banner_url = null;
-  for (const [kind, value] of [['thumbnail', thumbnail], ['banner', banner], ['rulebook', CATEGORY === 'video' ? '' : rulebook]]) {
+  for (const [kind, value] of [['thumbnail', thumbnail], ['banner', banner]]) {
     const v = value?.trim();
     if (!v) continue;
     if (isWebLink(v) || isUploaded(v)) payload[`${kind}_url`] = v;
     else uploads.push({ kind, ...localFile(kind, v) });
+  }
+  // An empty list removes the game's rulebooks. Ones with a local file get their link when uploaded.
+  if (CATEGORY !== 'video' && (rulebook?.length || Array.isArray(rulebook))) {
+    payload.rulebooks = rulebookList(game).map(({ name, file }) => {
+      if (isWebLink(file) || isUploaded(file)) return { name, url: file };
+      uploads.push({ kind: 'rulebook', name, ...localFile('rulebook', file) });
+      return { name, url: null };
+    });
   }
 
   const check = await admin('POST', '/games?dryRun=1', payload);

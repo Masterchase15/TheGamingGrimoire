@@ -2032,7 +2032,40 @@ a.addon:hover::after {
   margin-top: 10px;
 }
 
-/* Rulebook TLDR and FAQ */
+/* Rulebooks, TLDR and FAQ */
+.rulebook-list {
+  border: 1px solid var(--line);
+}
+.rulebook-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+}
+.rulebook-row + .rulebook-row {
+  border-top: 1px solid var(--line);
+}
+.rulebook-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 0;
+  font-weight: 650;
+}
+.rulebook-open svg:first-child {
+  flex-shrink: 0;
+  color: var(--gold);
+}
+.rulebook-open svg:last-child {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.rulebook-open:hover {
+  color: var(--gold);
+}
 .tldr-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

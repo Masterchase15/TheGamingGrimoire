@@ -1,15 +1,21 @@
-import { ArrowSquareOut, CaretDown, DownloadSimple } from '@phosphor-icons/react';
+import { ArrowSquareOut, BookBookmark, CaretDown, DownloadSimple } from '@phosphor-icons/react';
 
-/** Links to a game's full rulebook PDF. */
-export function RulebookLinks({ url }) {
+/** Every rulebook a game has, by name. */
+export function RulebookLinks({ rulebooks }) {
   return (
-    <div className="row wrap">
-      <a href={url} target="_blank" rel="noopener noreferrer" className="btn btn-gold btn-sm">
-        Read the full rulebook <ArrowSquareOut size={14} aria-hidden="true" />
-      </a>
-      <a href={url} download className="btn btn-ghost btn-sm">
-        <DownloadSimple size={14} weight="bold" aria-hidden="true" /> Download PDF
-      </a>
+    <div className="rulebook-list">
+      {rulebooks.map((r) => (
+        <div key={r.name} className="rulebook-row">
+          <a href={r.url} target="_blank" rel="noopener noreferrer" className="rulebook-open">
+            <BookBookmark size={18} weight="bold" aria-hidden="true" />
+            <span>{r.name}</span>
+            <ArrowSquareOut size={14} aria-hidden="true" />
+          </a>
+          <a href={r.url} download className="btn btn-ghost btn-sm" aria-label={`Download ${r.name} PDF`}>
+            <DownloadSimple size={14} weight="bold" aria-hidden="true" /> PDF
+          </a>
+        </div>
+      ))}
     </div>
   );
 }
