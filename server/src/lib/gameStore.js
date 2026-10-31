@@ -7,7 +7,7 @@ export const GAME_FIELDS = [
   'slug', 'title', 'category', 'tagline', 'description', 'aliases', 'genres', 'platforms', 'developer',
   'publisher', 'release_year', 'players', 'play_time', 'age', 'is_continuous', 'featured', 'hue', 'hltb_query',
   'steam_appid', 'bgg_id', 'patch_exclude', 'fandom_wiki', 'fandom_page', 'fandom_topics', 'wiki_url',
-  'thumbnail_url', 'banner_url', 'rulebook_url', 'rulebook_tldr', 'faq_url', 'unique_faq',
+  'thumbnail_url', 'banner_url', 'rulebooks', 'rulebook_tldr', 'faq_url', 'unique_faq',
 ];
 
 const DEFAULTS = {
@@ -24,7 +24,7 @@ export async function upsertGame(db, g, { managedBy }) {
   values[GAME_FIELDS.indexOf('is_continuous')] = Boolean(g.is_continuous);
   values[GAME_FIELDS.indexOf('featured')] = Boolean(g.featured);
   // JSONB columns: node-postgres would otherwise send these as Postgres arrays.
-  for (const f of ['rulebook_tldr', 'unique_faq']) values[GAME_FIELDS.indexOf(f)] = JSON.stringify(g[f] ?? []);
+  for (const f of ['rulebooks', 'rulebook_tldr', 'unique_faq']) values[GAME_FIELDS.indexOf(f)] = JSON.stringify(g[f] ?? []);
   const placeholders = GAME_FIELDS.map((_, i) => `$${i + 1}`).join(',');
   const updates = GAME_FIELDS.filter((f) => f !== 'slug').map((f) => `${f} = EXCLUDED.${f}`).join(', ');
   const { rows: [row] } = await db.query(
