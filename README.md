@@ -53,6 +53,8 @@ Press **Ctrl+C** in the window to stop everything. Local data lives in `.localdb
 
 On other platforms, or from a terminal: `npm install`, then `npm run dev`.
 
+Verification and password reset links are printed in that window instead of being emailed, unless `RESEND_API_KEY` and `EMAIL_FROM` are set in `.env`.
+
 To use your own Postgres instead of the bundled one, set `DATABASE_URL` in `.env`.
 
 ## Editing wiki content
@@ -128,6 +130,8 @@ To add games to the live site, set `ADMIN_API_KEY` on Railway, then run the scri
    - `BETTER_AUTH_URL` and `CLIENT_URL` = your public URL, e.g. `https://thegaminggrimoire.up.railway.app`
    - `NODE_ENV` = `production`
    - `STEAM_API_KEY` = your Steam Web API key
+   - `RESEND_API_KEY` = your [Resend](https://resend.com) API key, for verification and password reset emails
+   - `EMAIL_FROM` = the sender, e.g. `TheGamingGrimoire <noreply@yourdomain.com>`, on a domain verified in Resend. Without these two, email verification is off and password resets can't be sent
    - `ADMIN_API_KEY` = a long random string, if you want to add games with the add scripts (optional)
    - `BGG_API_TOKEN` = your BoardGameGeek API token, to sync board and card game expansions (optional)
 5. Under **Settings → Networking**, generate a domain (use it for the URLs above).

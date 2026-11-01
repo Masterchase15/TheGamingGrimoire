@@ -11,6 +11,9 @@ const FandomArticle = lazy(() => import('./pages/FandomArticle.jsx'));
 const Search = lazy(() => import('./pages/Search.jsx'));
 const Login = lazy(() => import('./pages/Auth.jsx').then((m) => ({ default: m.Login })));
 const Signup = lazy(() => import('./pages/Auth.jsx').then((m) => ({ default: m.Signup })));
+const ForgotPassword = lazy(() => import('./pages/Auth.jsx').then((m) => ({ default: m.ForgotPassword })));
+const ResetPassword = lazy(() => import('./pages/Auth.jsx').then((m) => ({ default: m.ResetPassword })));
+const VerifyEmail = lazy(() => import('./pages/Auth.jsx').then((m) => ({ default: m.VerifyEmail })));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
 const Community = lazy(() => import('./pages/Community.jsx'));
 const Forums = lazy(() => import('./pages/Forums.jsx'));
@@ -46,6 +49,9 @@ export default function App() {
         <Route path="search" element={<Search />} />
         <Route path="login" element={<Login />} />
         <Route path="signup" element={<Signup />} />
+        <Route path="forgot-password" element={<ForgotPassword />} />
+        <Route path="reset-password" element={<ResetPassword />} />
+        <Route path="verify-email" element={<VerifyEmail />} />
         <Route path="u/:username" element={<Profile />} />
         <Route
           path="community"
