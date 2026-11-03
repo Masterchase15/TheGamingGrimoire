@@ -172,6 +172,27 @@ export async function fetchStoreApp(appid) {
   };
 }
 
+/**
+ * When the current Steam discount of each app ends, from the store browse API
+ * (appdetails doesn't say; this one needs no key either). Map of appid → Date;
+ * apps without a dated discount are left out.
+ */
+export async function fetchSaleEnds(appids) {
+  const out = new Map();
+  if (!appids.length) return out;
+  const input = {
+    ids: appids.map((appid) => ({ appid })),
+    context: { language: 'english', country_code: COUNTRY.toUpperCase() },
+    data_request: {},
+  };
+  const json = await getJson(`https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json=${encodeURIComponent(JSON.stringify(input))}`);
+  for (const item of json?.response?.store_items ?? []) {
+    const ends = (item.best_purchase_option?.active_discounts ?? []).map((d) => Number(d.discount_end_date)).filter((t) => t > 0);
+    if (ends.length) out.set(item.appid ?? item.id, new Date(Math.min(...ends) * 1000));
+  }
+  return out;
+}
+
 /** Current prices for many apps in one request (Steam allows several ids only for price data). Map of appid → price or null. */
 export async function fetchStorePrices(appids) {
   const out = new Map();

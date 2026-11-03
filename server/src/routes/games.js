@@ -84,11 +84,13 @@ const priceOf = (r) => ({
   initial: r.price_initial,
   final: r.price_final,
   discount: r.price_discount ?? 0,
+  // When the sale ends; a date that has passed waits for the next price check.
+  saleEnds: r.price_discount > 0 && r.price_sale_ends > new Date() ? r.price_sale_ends : null,
 });
 
-const dlcPayload = ({ price_currency, price_initial, price_final, price_discount, ...d }) => ({
+const dlcPayload = ({ price_currency, price_initial, price_final, price_discount, price_sale_ends, ...d }) => ({
   ...d,
-  price: price_final != null ? priceOf({ price_currency, price_initial, price_final, price_discount }) : null,
+  price: price_final != null ? priceOf({ price_currency, price_initial, price_final, price_discount, price_sale_ends }) : null,
   url: steamStoreUrl(d.appid),
 });
 
@@ -129,7 +131,7 @@ router.get('/:slug', async (req, res) => {
     game.category === 'video'
       ? query(
           `SELECT appid, name, kind, description, header_url, release_date, released_on, coming_soon, is_free,
-             price_currency, price_initial, price_final, price_discount
+             price_currency, price_initial, price_final, price_discount, price_sale_ends
            FROM game_dlc WHERE game_id = $1
            ORDER BY coming_soon DESC, released_on DESC NULLS LAST, name`,
           [game.id]
@@ -153,7 +155,7 @@ router.get('/:slug', async (req, res) => {
   const {
     hltb_query, hltb_id, hltb_name, hltb_main, hltb_extra, hltb_complete, hltb_checked_at,
     steam_assets_checked_at, news_checked_at, fandom_topics, fandom_page, patch_exclude, store_checked_at, bgg_checked_at,
-    price_currency, price_initial, price_final, price_discount, is_free, wiki_info, ...publicGame
+    price_currency, price_initial, price_final, price_discount, price_sale_ends, is_free, wiki_info, ...publicGame
   } = game;
   // The wiki article "Read the wiki" opens; defaults to the game's own title on its wiki.
   // A wiki_url whose license doesn't allow republishing is linked to instead.
@@ -221,7 +223,7 @@ router.get('/:slug/fandom', async (req, res) => {
   const { game, source } = await wikiGame(req.params.slug);
   if (!source) return res.json({ fandom: externalWikiLink(game) });
   try {
-    const fandom = await getOverview(source, { page: game.fandom_page, topics: game.fandom_topics });
+    const fandom = await getOverview(source, { page: game.fandom_page || game.title, topics: game.fandom_topics });
     res.json({ fandom });
   } catch (err) {
     console.warn(`[fandom] overview ${req.params.slug}: ${err.message}`);

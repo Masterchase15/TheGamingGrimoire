@@ -74,6 +74,8 @@ npm run add-cgame -- "Star Wars: Unlimited"             # card game
 npm run add-vgame -- --file game-drafts/hades-ii.json   # send a draft you edited
 npm run add-vgame -- --pull elden-ring                  # download a game on the site as a draft
 npm run add-vgame -- --refresh hades-ii                 # re-fetch Steam / HLTB / Fandom data now
+npm run pull-games                                      # save every game on the site as a draft (see below)
+npm run remove-vgame -- hades-ii                        # take a game off the site (remove-bgame / remove-cgame too)
 ```
 
 All three scripts take the same commands and options and work the same way. Each one only calls the services for its category:
@@ -116,6 +118,38 @@ Every draft has a few optional fields for what the lookups can't find. Put files
 | `unique_faq` | board, card | Your own questions for anything the linked FAQ doesn't cover, shown under it in the FAQ section |
 
 Fill the fields in, then send with `--file`. A list of rulebooks is `[{ "name": "Base Game", "file": "..." }]`, a draft's `rulebook_tldr` is `[{ "heading": "...", "points": ["..."] }]` and its `unique_faq` is `[{ "q": "...", "a": "..." }]`.
+
+### Editing any game, including the original ones
+
+`npm run pull-games` saves every game on the site that has no draft yet to `game-drafts/<slug>.json`, including the games the site started with (the seed files). Pass slugs to pull only those, `--category board` for one category, or `--overwrite` to replace drafts you already have. Edit a draft and send it with its category's script (`npm run add-bgame -- --file game-drafts/catan.json`). Once sent, the game is managed through its draft and later edits to the seed files are ignored for it.
+
+### Grimoire quick guides
+
+A draft's `sections` are the game's Grimoire quick guides, listed under the Wiki on its page in the order given. Add, edit, reorder or delete entries, then send the draft; the game's guides are replaced with the list in the draft (an empty list removes them all).
+
+```json
+"sections": [
+  {
+    "title": "How to Play",
+    "icon": "BookOpen",
+    "summary": "Setup, turns and how to win.",
+    "content": [
+      "## Setup",
+      "Each player takes **two** settlements.",
+      "",
+      "## Your turn",
+      "1. Roll the dice."
+    ],
+    "terms": [{ "term": "Robber", "definition": "Blocks a hex from producing." }]
+  }
+]
+```
+
+`content` is Markdown, as one text or a list of lines. `slug` (the guide's URL, `/game/<game>/<slug>`) is made from the title when left out; keep it the same to keep old links working. `summary`, `icon` and `terms` (a glossary shown under the guide) are optional. Icons: BookOpen, Cards, Compass, Cpu, Crosshair, Crown, Drop, Hammer, Lightbulb, Lightning, ListMagnifyingGlass, MagicWand, MapTrifold, Moon, Parachute, PersonSimpleRun, Planet, Plant, Ranking, Sparkle, Sword, TextItalic, Translate, Trophy, UsersThree.
+
+### Removing games
+
+`npm run remove-vgame -- <slug or title>` (or `remove-bgame` / `remove-cgame`) shows what the game takes with it and asks before removing it: its page, quick guides, library entries, reviews, patch notes, DLC and uploaded files. Forum threads about it stay, no longer tied to a game. Seed-file games are remembered as removed, so a restart doesn't add them back; sending the game's draft again adds it back. `--dry-run` only shows what would be removed.
 
 To add games to the live site, set `ADMIN_API_KEY` on Railway, then run the script with `--api https://your-app.up.railway.app` and the same key in your local environment.
 

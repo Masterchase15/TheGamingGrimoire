@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MagnifyingGlass, X } from '@phosphor-icons/react';
+import { MagnifyingGlass, Tag, X } from '@phosphor-icons/react';
 import { useApi } from '../lib/api.js';
 import { CATEGORIES } from '../lib/format.js';
 import GameCard, { GameGridSkeleton } from '../components/GameCard.jsx';
@@ -22,6 +22,8 @@ export default function Category({ category }) {
   const genre = params.get('genre') ?? '';
   const sort = params.get('sort') ?? 'popular';
   const type = params.get('type') ?? '';
+  // Video games currently discounted on Steam (prices are re-checked every few hours).
+  const onSale = category === 'video' && params.get('sale') === '1';
   const { data, error, loading, reload } = useApi(`/games?category=${category}&sort=${sort}`);
   const [showAllGenres, setShowAllGenres] = useState(false);
 
@@ -50,10 +52,11 @@ export default function Category({ category }) {
       if (genre && !g.genres.includes(genre)) return false;
       if (type === 'ongoing' && !g.is_continuous) return false;
       if (type === 'finite' && g.is_continuous) return false;
+      if (onSale && !(g.price_discount > 0)) return false;
       if (!needle) return true;
       return [g.title, g.tagline, ...g.genres].some((s) => s?.toLowerCase().includes(needle));
     });
-  }, [data, q, genre, type]);
+  }, [data, q, genre, type, onSale]);
 
   const headArt = (data?.games ?? []).filter((g) => g.capsule_url).slice(0, 3);
 
@@ -108,6 +111,11 @@ export default function Category({ category }) {
               <option value="finite">Single-player / finite</option>
               <option value="ongoing">Live-service / ongoing</option>
             </select>
+          )}
+          {category === 'video' && (
+            <button className="filter-chip sale-filter" aria-pressed={onSale} onClick={() => update('sale', onSale ? '' : '1')}>
+              <Tag size={14} weight="bold" aria-hidden="true" /> On sale
+            </button>
           )}
           <select className="select" value={sort} onChange={(e) => update('sort', e.target.value)} aria-label="Sort by">
             <option value="popular">Most popular</option>
@@ -164,7 +172,7 @@ export default function Category({ category }) {
               </button>
             }
           >
-            Try a different search or genre.
+            {onSale ? 'None of these games are on sale on Steam right now.' : 'Try a different search or genre.'}
           </Empty>
         )}
       </div>

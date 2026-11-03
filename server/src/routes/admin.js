@@ -18,6 +18,7 @@ import { HttpError } from '../lib/session.js';
 import { hasSteamKey } from '../lib/steam.js';
 import { syncAssets, syncGameNews, syncGameStore } from '../lib/steamSync.js';
 import { ensureWikiInfo, indexGameWiki } from '../lib/wikiSync.js';
+import { ALL_GAMES } from '../seed/seed.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -125,6 +126,12 @@ async function enrich(id, { force = false } = {}) {
 // Lets scripts check their key before sending anything.
 router.get('/me', (req, res) => res.json({ ok: true, actor: req.admin.actor, via: req.admin.via }));
 
+// Every game on the site (for the pull-games script).
+router.get('/games', async (req, res) => {
+  const { rows } = await query(`SELECT slug, title, category, managed_by FROM games ORDER BY category, title`);
+  res.json({ games: rows });
+});
+
 // The stored game in the same shape POST accepts: handy for editing an existing game.
 router.get('/games/:slug', async (req, res) => {
   const stored = await loadGame(req.params.slug);
@@ -154,6 +161,7 @@ router.post('/games', async (req, res) => {
 
   const { id, created } = await withTransaction(async (db) => {
     const row = await upsertGame(db, game, { managedBy: 'api' });
+    await db.query(`DELETE FROM removed_games WHERE slug = $1`, [game.slug]);
     if (sections) await replaceSections(db, row.id, sections);
     if (expansions) await replaceExpansions(db, row.id, expansions);
     await audit(db, req, row.created ? 'create' : 'update', game.slug, {
@@ -230,6 +238,34 @@ router.post('/games/:slug/refresh', async (req, res) => {
   if (!g) throw new HttpError(404, 'Game not found.');
   await audit({ query }, req, 'refresh', g.slug, {});
   res.json({ slug: g.slug, enrichment: await enrich(g.id, { force: true }) });
+});
+
+// Removes a game from the site, or with ?dryRun=1 only reports what would go with it.
+// Its library entries, reviews, quick guides, patch notes, DLC and uploaded files are
+// deleted; its forum threads stay, no longer tied to a game. A game from the seed
+// files is recorded in removed_games so the seed sync doesn't add it back.
+router.delete('/games/:slug', async (req, res) => {
+  const { rows: [g] } = await query(`SELECT id, slug, title, category, managed_by FROM games WHERE slug = $1`, [req.params.slug]);
+  if (!g) throw new HttpError(404, 'Game not found.');
+  const { rows: [counts] } = await query(
+    `SELECT (SELECT count(*)::int FROM user_games WHERE game_id = $1) AS library_entries,
+       (SELECT count(*)::int FROM reviews WHERE game_id = $1) AS reviews,
+       (SELECT count(*)::int FROM forum_threads WHERE game_id = $1) AS threads,
+       (SELECT count(*)::int FROM wiki_sections WHERE game_id = $1) AS sections`,
+    [g.id]
+  );
+  const inSeed = ALL_GAMES.some((s) => s.slug === g.slug);
+  const { id, ...game } = g;
+  const summary = { ...game, in_seed: inSeed, ...counts };
+  if (req.query.dryRun) return res.json({ status: 'would-remove', ...summary });
+
+  await withTransaction(async (db) => {
+    if (inSeed) await db.query(`INSERT INTO removed_games (slug) VALUES ($1) ON CONFLICT (slug) DO NOTHING`, [g.slug]);
+    await db.query(`DELETE FROM games WHERE id = $1`, [id]);
+    await audit(db, req, 'remove', g.slug, { title: g.title, ...counts });
+  });
+  await fs.rm(path.join(UPLOADS_DIR, g.slug), { recursive: true, force: true });
+  res.json({ status: 'removed', ...summary });
 });
 
 // Hand a game back to the seed files: the next seed sync overwrites it from server/src/seed/data.

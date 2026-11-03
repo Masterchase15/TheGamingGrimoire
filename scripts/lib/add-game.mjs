@@ -17,6 +17,12 @@
 // When a game with a rulebook has no "rulebook_tldr" yet, Claude reads the main PDF and
 // writes it, and fills empty Details fields (needs ANTHROPIC_API_KEY in .env; see
 // rulebook.mjs). The results are saved in the draft, so you can edit them.
+//
+// "sections" are the game's Grimoire quick guides, in page order (every category):
+//   { "title": "How to Play", "icon": "BookOpen", "summary": "...", "content": ["## Setup", "Markdown, one line per entry"] }
+// "content" is Markdown, as one text or a list of lines; "slug" (the guide's URL name) is
+// made from the title when left out. Optional "terms" adds a glossary: [{ "term": "...", "definition": "..." }].
+// Sending a draft replaces all of the game's quick guides with its "sections".
 // After saving, the server itself fetches Steam art (any game with a steam_appid),
 // patch notes, price, DLC and HowLongToBeat times (video games), BoardGameGeek
 // expansions (board/card games with a bgg_id) and the Fandom overview.
@@ -26,7 +32,8 @@
 //   npm run add-vgame -- --pull elden-ring               save a game that's on the site as a draft to edit
 //   npm run add-vgame -- --refresh hades-ii              re-fetch Steam, HowLongToBeat and Fandom data now
 //   npm run add-vgame -- --release celeste               hand a game back to the seed files (server/src/seed/data)
-// (add-bgame and add-cgame take the same commands.)
+// (add-bgame and add-cgame take the same commands. npm run pull-games saves every game on
+// the site as a draft at once; npm run remove-vgame / remove-bgame / remove-cgame take a game off it.)
 //
 // Options:
 //   --slug <slug>             URL name (default: made from the title)
@@ -91,7 +98,7 @@ const fail = (msg) => {
 };
 
 // ---------- helpers ----------
-const slugify = (s) =>
+export const slugify = (s) =>
   s.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/['’]/g, '').replace(/&/g, ' and ')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const norm = (s) => s.toLowerCase().replace(/[™®©]/g, '').replace(/[^a-z0-9]+/g, '');
@@ -213,6 +220,35 @@ function saveDraft(game) {
   fs.writeFileSync(draftPath(game.slug), JSON.stringify(ordered(game), null, 2) + '\n');
   return path.relative(root, draftPath(game.slug));
 }
+// A game from the admin API (GET /api/admin/games/:slug) as a draft: uploaded files and
+// links go in the draft's file fields, and quick guide text is split into lines.
+export function draftFromStored(game) {
+  const { thumbnail_url, banner_url, rulebooks, faq_url, ...pulled } = game;
+  const tabletop = game.category !== 'video';
+  return {
+    ...pulled,
+    wiki_url: pulled.wiki_url ?? '',
+    thumbnail: thumbnail_url ?? '',
+    banner: banner_url ?? '',
+    ...(tabletop ? { rulebook: (rulebooks ?? []).map((r) => ({ name: r.name, file: r.url ?? '' })), faq: faq_url ?? '' } : {}),
+    sections: (pulled.sections ?? []).map((s) => ({ ...s, ...(s.content?.includes('\n') ? { content: s.content.split('\n') } : {}) })),
+  };
+}
+
+// Quick guides as the server takes them: a "content" list of lines joined, a missing slug made from the title.
+function sectionsToSend(sections) {
+  if (!Array.isArray(sections)) return sections;
+  return sections.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const out = { ...s };
+    if (!out.slug && typeof out.title === 'string') out.slug = slugify(out.title);
+    if (Array.isArray(out.content)) out.content = out.content.join('\n');
+    return out;
+  });
+}
+
+export const saveDraftFile = (game) => saveDraft(game);
+
 const fill = (g, key, value) => {
   const empty = g[key] === undefined || g[key] === '' || (Array.isArray(g[key]) && !g[key].length);
   if (empty && value !== undefined && value !== null && !(Array.isArray(value) && !value.length)) g[key] = value;
@@ -511,7 +547,11 @@ function preview(g) {
 }
 
 const fmtPrice = (p) =>
-  p === 'free' ? 'free' : p ? `${(p.final / 100).toFixed(2)} ${p.currency}${p.discount ? c.warn(` (−${p.discount}% sale)`) : ''}` : 'no price listed';
+  p === 'free'
+    ? 'free'
+    : p
+      ? `${(p.final / 100).toFixed(2)} ${p.currency}${p.discount ? c.warn(` (−${p.discount}% sale${p.saleEnds ? `, ends ${new Date(p.saleEnds).toLocaleString()}` : ''})`) : ''}`
+      : 'no price listed';
 
 function printEnrichment(e) {
   const line = (name, r, okText) =>
@@ -560,11 +600,7 @@ export async function runAddGame(category) {
     const { status, json } = await admin('GET', `/games/${encodeURIComponent(opts.pull)}`);
     if (status !== 200) fail(json.error);
     checkCategory(json.game, json.game.title);
-    json.game.wiki_url ??= '';
-    const { thumbnail_url, banner_url, rulebooks, faq_url, ...pulled } = json.game;
-    const rulebook = rulebooks.map((r) => ({ name: r.name, file: r.url ?? '' }));
-    json.game = { ...pulled, thumbnail: thumbnail_url ?? '', banner: banner_url ?? '', ...(CATEGORY === 'video' ? {} : { rulebook, faq: faq_url ?? '' }) };
-    console.log(c.ok(`Saved ${saveDraft(json.game)}`) + c.dim(` (currently managed by: ${json.managed_by}). Edit it, then run with --file.`));
+    console.log(c.ok(`Saved ${saveDraft(draftFromStored(json.game))}`) + c.dim(` (currently managed by: ${json.managed_by}). Edit it, then run with --file.`));
     process.exit(0);
   }
 
@@ -621,6 +657,7 @@ export async function runAddGame(category) {
   // Local files are uploaded after the game is saved; links are stored as they are.
   const { thumbnail, banner, rulebook, faq, ...payload } = game;
   if (faq?.trim()) payload.faq_url = faq.trim();
+  if ('sections' in payload) payload.sections = sectionsToSend(payload.sections);
   const uploads = [];
   // An empty banner removes any banner sent before, so the page goes back to its usual one.
   if (banner === '') payload.banner_url = null;
