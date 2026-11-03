@@ -2,7 +2,7 @@
 // then on an interval, so new game updates and sales appear on the site without
 // anyone redeploying.
 import { query } from '../db/pool.js';
-import { fetchAssets, fetchPatchNotes, fetchStoreApp, fetchStorePrices, hasSteamKey } from './steam.js';
+import { fetchAssets, fetchPatchNotes, fetchSaleEnds, fetchStoreApp, fetchStorePrices, hasSteamKey } from './steam.js';
 
 const ASSET_MAX_AGE_DAYS = 7;
 const NEWS_INTERVAL_MIN = Number(process.env.STEAM_NEWS_INTERVAL_MIN || 30);
@@ -150,14 +150,42 @@ export async function syncGameStore(game, { force = false } = {}) {
       );
     }
   }
-  return { price: app.isFree ? 'free' : p, dlc: app.dlc.length };
+  const saleEnds = await syncSaleEnds(game);
+  return { price: app.isFree ? 'free' : p && { ...p, saleEnds }, dlc: app.dlc.length };
+}
+
+// When the game's and its DLC's current sales end. A failed lookup only leaves the dates out.
+async function syncSaleEnds(game) {
+  const { rows } = await query(
+    `SELECT $2::int AS appid FROM games WHERE id = $1 AND price_discount > 0
+     UNION SELECT appid FROM game_dlc WHERE game_id = $1 AND price_discount > 0`,
+    [game.id, game.steam_appid]
+  );
+  const ends = rows.length
+    ? await fetchSaleEnds(rows.map((r) => r.appid)).catch((err) => {
+        console.warn(`[steam] Sale end dates for ${game.title ?? game.steam_appid}: ${err.message}`);
+        return new Map();
+      })
+    : new Map();
+  const gameEnds = ends.get(game.steam_appid) ?? null;
+  ends.delete(game.steam_appid);
+  await query(`UPDATE games SET price_sale_ends = $2 WHERE id = $1`, [game.id, gameEnds]);
+  await query(
+    `UPDATE game_dlc d SET price_sale_ends = e.ends
+     FROM (SELECT d2.appid, x.ends FROM game_dlc d2
+           LEFT JOIN unnest($2::int[], $3::timestamptz[]) AS x(appid, ends) ON x.appid = d2.appid
+           WHERE d2.game_id = $1) e
+     WHERE d.game_id = $1 AND d.appid = e.appid`,
+    [game.id, [...ends.keys()], [...ends.values()]]
+  );
+  return gameEnds;
 }
 
 /** Price and DLC check for every video game on Steam whose last check is older than the interval. */
 export async function syncAllStore() {
   const { rows } = await query(
     `SELECT id, title, steam_appid FROM games WHERE category = 'video' AND steam_appid IS NOT NULL
-       AND (store_checked_at IS NULL OR store_checked_at < now() - make_interval(mins => $1))
+       AND (store_checked_at IS NULL OR store_checked_at < now() - make_interval(mins => $1) OR price_sale_ends < now())
      ORDER BY store_checked_at NULLS FIRST, id`,
     [Math.round(STORE_INTERVAL_HOURS * 60) - 5]
   );
@@ -177,7 +205,8 @@ const storeInFlight = new Set();
 export function refreshStoreIfStale(game) {
   if (game.category !== 'video' || !game.steam_appid || storeInFlight.has(game.id)) return;
   const checked = game.store_checked_at ? new Date(game.store_checked_at).getTime() : 0;
-  if (Date.now() - checked < STORE_INTERVAL_HOURS * 3600000) return;
+  const saleOver = game.price_sale_ends && new Date(game.price_sale_ends).getTime() < Date.now();
+  if (!saleOver && Date.now() - checked < STORE_INTERVAL_HOURS * 3600000) return;
   storeInFlight.add(game.id);
   syncGameStore(game)
     .catch((err) => console.warn(`[steam] ${game.title}: ${err.message}`))

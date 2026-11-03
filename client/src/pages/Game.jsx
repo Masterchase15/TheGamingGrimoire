@@ -73,8 +73,10 @@ export default function Game() {
   // "Read the wiki" opens the game's wiki article (Fandom or its own wiki), or the wiki's own site when its
   // license doesn't allow showing it here; games without a wiki fall back to the first quick guide.
   const externalWiki = game.wiki?.mode === 'link' ? game.wiki.url : null;
-  const wikiLink = game.fandom_page ? wikiPath(game.slug, game.fandom_page) : sections[0] && `/game/${game.slug}/${sections[0].slug}`;
   const embedded = fandom?.mode !== 'link' ? fandom : null;
+  // Once the overview has loaded, its article is one that exists (the wiki's front page when the game has none).
+  const wikiPage = embedded?.main?.title ?? game.fandom_page;
+  const wikiLink = wikiPage ? wikiPath(game.slug, wikiPage) : sections[0] && `/game/${game.slug}/${sections[0].slug}`;
   const cat = CATEGORIES[game.category];
   const totalMembers = Object.values(stats).reduce((a, b) => a + b, 0);
   const showPatches = game.category === 'video';
@@ -138,7 +140,7 @@ export default function Game() {
               {game.is_continuous && <LiveChip glass />}
               {game.current_version && <span className="chip chip-gold chip-glass">v{game.current_version}</span>}
               {onSale && (
-                <a href={steam.storeUrl} target="_blank" rel="noreferrer noopener" className="chip chip-sale chip-glass" title="On sale on Steam">
+                <a href={steam.storeUrl} target="_blank" rel="noreferrer noopener" className="chip chip-sale chip-glass" title={store.price.saleEnds ? `On sale on Steam. ${saleEndsText(store.price.saleEnds)}` : 'On sale on Steam'}>
                   <Tag size={12} weight="bold" aria-hidden="true" /> −{store.price.discount}% · {money(store.price.final, store.price.currency)}
                 </a>
               )}
@@ -451,6 +453,15 @@ function Price({ price, isFree, big }) {
   );
 }
 
+// "Sale ends Thu, Nov 6, 10:00 AM · in 3 days", in the viewer's time zone.
+function saleEndsText(date) {
+  const d = new Date(date);
+  const when = d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const hoursLeft = (d.getTime() - Date.now()) / 3600000;
+  const left = hoursLeft < 1 ? 'less than an hour' : hoursLeft < 48 ? `${Math.round(hoursLeft)} hours` : `${Math.round(hoursLeft / 24)} days`;
+  return `Sale ends ${when} · in ${left}`;
+}
+
 function PriceCard({ store, steam }) {
   const sale = store.price?.discount > 0;
   return (
@@ -463,6 +474,11 @@ function PriceCard({ store, steam }) {
         {sale && <span className="chip chip-sale">−{store.price.discount}%</span>}
       </div>
       <Price price={store.price} isFree={store.isFree} big />
+      {sale && store.price.saleEnds && (
+        <span className="sale-ends">
+          <Clock size={13} weight="bold" aria-hidden="true" /> {saleEndsText(store.price.saleEnds)}
+        </span>
+      )}
       {!store.isFree && !store.price && <p className="small text-2">Steam doesn’t list a price for this game right now.</p>}
       <div className="row" style={{ justifyContent: 'space-between', gap: 12 }}>
         <span className="xs text-3">Checked {timeAgo(store.checkedAt)}. Steam sales are re-checked every few hours.</span>
@@ -508,7 +524,11 @@ function DlcList({ dlc, steam }) {
                   d.released_on && isRecent(d.released_on, 60) && <span className="chip chip-solid">New</span>
                 )}
                 {DLC_KINDS[d.kind] !== null && <span className="chip">{DLC_KINDS[d.kind] ?? d.kind}</span>}
-                {d.price?.discount > 0 && <span className="chip chip-sale">−{d.price.discount}%</span>}
+                {d.price?.discount > 0 && (
+                  <span className="chip chip-sale" title={d.price.saleEnds ? saleEndsText(d.price.saleEnds) : undefined}>
+                    −{d.price.discount}%{d.price.saleEnds && ` · until ${new Date(d.price.saleEnds).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}
+                  </span>
+                )}
               </div>
               <h3 className="addon-title">{d.name}</h3>
               {d.description && <p className="addon-desc">{d.description}</p>}

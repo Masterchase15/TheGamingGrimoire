@@ -185,6 +185,13 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
 );
 CREATE INDEX IF NOT EXISTS admin_audit_log_created_idx ON admin_audit_log (created_at DESC);
 
+-- Seed-file games removed with the remove-?game scripts, so the seed sync doesn't
+-- add them back. Adding the game again through the admin API clears its row.
+CREATE TABLE IF NOT EXISTS removed_games (
+  slug        TEXT PRIMARY KEY,
+  removed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Steam store data for video games: the current price (refreshed every few hours,
 -- since Steam runs frequent sales) and the game's DLC.
 ALTER TABLE games ADD COLUMN IF NOT EXISTS price_currency TEXT;
@@ -213,6 +220,10 @@ CREATE TABLE IF NOT EXISTS game_dlc (
   checked_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (game_id, appid)
 );
+
+-- When a Steam sale ends (null when not on sale, or Steam doesn't say).
+ALTER TABLE games ADD COLUMN IF NOT EXISTS price_sale_ends TIMESTAMPTZ;
+ALTER TABLE game_dlc ADD COLUMN IF NOT EXISTS price_sale_ends TIMESTAMPTZ;
 
 -- Board and card game expansions: synced from BoardGameGeek (source 'bgg') when the
 -- game has a bgg_id and BGG_API_TOKEN is set, or listed by hand in the game's JSON ('manual').

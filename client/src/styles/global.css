@@ -1569,6 +1569,16 @@ input[type='search']::-webkit-search-decoration {
 .toolbar .select {
   width: auto;
 }
+.toolbar .filter-chip {
+  height: auto;
+  align-self: stretch;
+}
+/* The video page's "On sale" toggle uses the sale color, like the sale chips. */
+.filter-chip.sale-filter[aria-pressed='true'] {
+  background: var(--ember);
+  border-color: var(--ember);
+  color: #1a0700;
+}
 .crumbs {
   display: flex;
   flex-wrap: wrap;
@@ -1888,6 +1898,17 @@ input[type='search']::-webkit-search-decoration {
 .price-was {
   font-weight: 500;
   color: var(--text-3);
+}
+.sale-ends {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ember);
 }
 
 /* DLC and expansions */

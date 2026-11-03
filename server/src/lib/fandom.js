@@ -107,12 +107,15 @@ async function cached(key, ttl, loader) {
 
 const NON_ARTICLE = /^(file|image|media|category|special|template|user|user talk|talk|help|module|mediawiki|forum|message wall|blog|board|thread|map|project|.+ talk):/i;
 
-/** Game overview: the main article summary plus featured topic cards. */
+/** Game overview: the main article summary (or the wiki's front page) plus featured topic cards. */
 export function getOverview(source, { page, topics }) {
   const sig = crypto.createHash('md5').update(JSON.stringify([page, topics])).digest('hex').slice(0, 10);
   return cached(`overview:${source.id}:${sig}`, OVERVIEW_TTL, async () => {
     const site = await api(source, { action: 'query', meta: 'siteinfo', siprop: 'general|statistics' });
-    const titles = [page, ...topics].filter(Boolean);
+    const g = site.query.general;
+    // A game without its own article (e.g. a board game on its video game's wiki)
+    // shows the wiki's front page, so the overview still has its buttons.
+    const titles = [...new Set([page, g.mainpage, ...topics].filter(Boolean))];
     const resolved = new Map();
     const contentNs = await contentNamespaces(source);
     // TextExtracts handles up to 20 intro extracts per request.
@@ -147,14 +150,22 @@ export function getOverview(source, { page, topics }) {
         });
       }
     }
-    // TextExtracts returns nothing for articles that open with an infobox, so
-    // fall back to the first real paragraph of the article's lead section.
-    const missing = [...resolved.values()].filter((r) => !r.extract);
+    // TextExtracts returns nothing for articles that open with an infobox, and wikis
+    // without TextExtracts/PageImages (e.g. wiki.gg) return neither, so fall back to
+    // the article's lead section for the first real paragraph and image.
+    const missing = [...resolved.values()].filter((r) => !r.extract || !r.thumbnail);
     await mapLimit(missing, 4, async (r) => {
-      r.extract = await introParagraph(source, r.title).catch(() => null);
+      const lead = await leadSection(source, r.title).catch(() => null);
+      r.extract ||= lead?.extract ?? null;
+      if (!r.thumbnail && lead?.image) {
+        r.thumbnail = lead.image.src;
+        r.icon = lead.image.width < 260 && lead.image.height < 260;
+      }
     });
 
-    const main = resolved.get(page) ?? null;
+    const found = resolved.get(page) ?? resolved.get(g.mainpage);
+    // The front page often has no picture of its own: use the wiki's logo.
+    const main = found && { ...found, thumbnail: found.thumbnail ?? absoluteUrl(source, g.logo) };
     const seen = new Set(main ? [main.title] : []);
     const topicCards = [];
     for (const t of topics) {
@@ -164,7 +175,6 @@ export function getOverview(source, { page, topics }) {
         topicCards.push(r);
       }
     }
-    const g = site.query.general;
     return {
       mode: 'embed',
       wiki: source.id,
@@ -197,10 +207,30 @@ const decodeEntities = (s) =>
     .replace(/&gt;/g, '>')
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
 
-/** First substantial paragraph of an article's lead, as plain text (~2 sentences). */
-async function introParagraph(source, title) {
+const absoluteUrl = (source, src) => (!src ? null : src.startsWith('//') ? `https:${src}` : src.startsWith('/') ? `${source.base}${src}` : src);
+
+/** An article's lead section: its first substantial paragraph and its first sizeable image. */
+async function leadSection(source, title) {
   const json = await api(source, { action: 'parse', page: title, prop: 'text', section: '0', disableeditsection: '1', redirects: '1' });
-  const html = json.parse.text
+  return { extract: introParagraph(json.parse.text), image: leadImage(source, json.parse.text) };
+}
+
+// The first image in the lead (usually the infobox picture), skipping tiny icons.
+function leadImage(source, html) {
+  for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
+    const attr = (name) => m[0].match(new RegExp(`\\s${name}="([^"]*)"`, 'i'))?.[1];
+    const width = Number(attr('width')) || 0;
+    const height = Number(attr('height')) || 0;
+    const src = attr('data-src') || attr('src');
+    if (!src || src.startsWith('data:') || (width && width < 80) || (height && height < 80)) continue;
+    return { src: absoluteUrl(source, decodeEntities(src)), width, height };
+  }
+  return null;
+}
+
+/** First substantial paragraph of an article's lead HTML, as plain text (~2 sentences). */
+function introParagraph(leadHtml) {
+  const html = leadHtml
     .replace(/<(aside|table|figure|style|script|blockquote)[\s\S]*?<\/\1>/gi, '')
     .replace(/<div[^>]*class="[^"]*quote[^"]*"[\s\S]*?<\/div>/gi, '')
     .replace(/<sup[\s\S]*?<\/sup>/gi, '');

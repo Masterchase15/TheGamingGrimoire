@@ -15,6 +15,10 @@
     "add-vgame": "node scripts/add-vgame.mjs",
     "add-bgame": "node scripts/add-bgame.mjs",
     "add-cgame": "node scripts/add-cgame.mjs",
+    "remove-vgame": "node scripts/remove-vgame.mjs",
+    "remove-bgame": "node scripts/remove-bgame.mjs",
+    "remove-cgame": "node scripts/remove-cgame.mjs",
+    "pull-games": "node scripts/pull-games.mjs",
     "make-admin": "node scripts/make-admin.mjs"
   },
   "engines": {
