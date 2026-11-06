@@ -77,6 +77,8 @@ async function enrich(id, { force = false } = {}) {
         await syncGameNews(g);
         const { rows: [n] } = await query(`SELECT count(*)::int AS count FROM game_updates WHERE game_id = $1`, [id]);
         out.steam.patchNotes = n.count;
+        const { rows: [nw] } = await query(`SELECT count(*)::int AS count FROM game_news WHERE game_id = $1`, [id]);
+        out.steam.news = nw.count;
       }
     } catch (err) {
       out.steam = failure(err);

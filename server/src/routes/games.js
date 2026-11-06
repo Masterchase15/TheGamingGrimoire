@@ -108,7 +108,7 @@ router.get('/:slug', async (req, res) => {
   refreshGameNewsIfStale(game);
   refreshStoreIfStale(game);
 
-  const [sections, statusCounts, entry, threads, updates, reviews, addons] = await Promise.all([
+  const [sections, statusCounts, entry, threads, updates, news, reviews, addons] = await Promise.all([
     query(
       `SELECT s.slug, s.title, s.icon, s.summary,
         (SELECT count(*)::int FROM glossary_terms t WHERE t.section_id = s.id) AS term_count
@@ -124,6 +124,13 @@ router.get('/:slug', async (req, res) => {
       ? query(
           `SELECT id, title, url, version, published_at, left(content, 1500) AS excerpt
            FROM game_updates WHERE game_id = $1 ORDER BY published_at DESC LIMIT 10`,
+          [game.id]
+        )
+      : { rows: [] },
+    game.category === 'video'
+      ? query(
+          `SELECT id, title, url, author, published_at, left(content, 1500) AS excerpt
+           FROM game_news WHERE game_id = $1 ORDER BY published_at DESC LIMIT 10`,
           [game.id]
         )
       : { rows: [] },
@@ -181,6 +188,7 @@ router.get('/:slug', async (req, res) => {
         }
       : null,
     updates: updates.rows.map((u) => ({ ...u, excerpt: plainExcerpt(u.excerpt) })),
+    news: news.rows.map((n) => ({ ...n, excerpt: plainExcerpt(n.excerpt) })),
     store:
       game.category === 'video' && game.steam_appid && game.store_checked_at
         ? {
@@ -342,3 +350,14 @@ router.get('/:slug/sections/:section', async (req, res) => {
 });
 
 export default router;
+
+router.get('/:slug/news/:id', async (req, res) => {
+  const { rows } = await query(
+    `SELECT n.id, n.title, n.url, n.author, n.content, n.published_at, g.slug AS game_slug, g.title AS game_title
+     FROM game_news n JOIN games g ON g.id = n.game_id
+     WHERE g.slug = $1 AND n.id = $2`,
+    [req.params.slug, Number(req.params.id)]
+  );
+  if (!rows[0]) throw new HttpError(404, 'News post not found.');
+  res.json({ news: rows[0] });
+});

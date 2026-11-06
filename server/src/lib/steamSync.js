@@ -1,8 +1,8 @@
-// Keeps Steam artwork, patch notes, prices and DLC fresh. Runs once at startup and
+// Keeps Steam artwork, patch notes, news posts, prices and DLC fresh. Runs once at startup and
 // then on an interval, so new game updates and sales appear on the site without
 // anyone redeploying.
 import { query } from '../db/pool.js';
-import { fetchAssets, fetchPatchNotes, fetchSaleEnds, fetchStoreApp, fetchStorePrices, hasSteamKey } from './steam.js';
+import { fetchAnnouncements, fetchAssets, fetchSaleEnds, fetchStoreApp, fetchStorePrices, hasSteamKey } from './steam.js';
 
 const ASSET_MAX_AGE_DAYS = 7;
 const NEWS_INTERVAL_MIN = Number(process.env.STEAM_NEWS_INTERVAL_MIN || 30);
@@ -34,11 +34,14 @@ export async function syncAssets({ force = false, gameId = null } = {}) {
   return rows.length;
 }
 
-/** Fetches patch notes for one video game and records any new ones. Returns the number of new updates. */
+/**
+ * Fetches the Steam announcements for one video game and records any new patch
+ * notes and news posts. Returns the number of new patch notes.
+ */
 export async function syncGameNews(game) {
   // Drop stale rows so excluded or re-titled posts don't linger.
   await query(`DELETE FROM game_updates WHERE game_id = $1 AND $2::text IS NOT NULL AND title ~* $2`, [game.id, game.patch_exclude ?? null]);
-  const notes = await fetchPatchNotes(game.steam_appid, { exclude: game.patch_exclude });
+  const { patches: notes, news } = await fetchAnnouncements(game.steam_appid, { exclude: game.patch_exclude });
   // Forget stored posts in the fetched window that no longer qualify (e.g. after the filter changes).
   if (notes.length) {
     await query(
@@ -56,6 +59,7 @@ export async function syncGameNews(game) {
     );
     if (rowCount) added += 1;
   }
+  await syncNewsPosts(game, news, notes);
   const latest = notes[0];
   const versioned = notes.find((n) => n.version);
   await query(
@@ -68,6 +72,26 @@ export async function syncGameNews(game) {
   return added;
 }
 
+// News posts: every announcement that isn't a patch. A post that became a patch
+// (or was deleted on Steam) inside the fetched window is removed.
+async function syncNewsPosts(game, news, patches) {
+  await query(`DELETE FROM game_news WHERE game_id = $1 AND gid = ANY($2)`, [game.id, patches.map((n) => n.gid)]);
+  if (news.length) {
+    await query(
+      `DELETE FROM game_news WHERE game_id = $1 AND NOT (gid = ANY($2)) AND published_at >= $3`,
+      [game.id, news.map((n) => n.gid), news.at(-1).published_at]
+    );
+  }
+  for (const n of news) {
+    await query(
+      `INSERT INTO game_news (game_id, gid, title, url, author, content, published_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (gid) DO UPDATE SET title = $3, url = $4, author = $5, content = $6`,
+      [game.id, n.gid, n.title, n.url, n.author, n.content, n.published_at]
+    );
+  }
+}
+
 export async function syncAllNews() {
   const { rows } = await query(
     `SELECT id, title, steam_appid, patch_exclude FROM games WHERE category = 'video' AND steam_appid IS NOT NULL ORDER BY id`
@@ -76,7 +100,7 @@ export async function syncAllNews() {
     try {
       await syncGameNews(game);
     } catch (err) {
-      console.warn(`[steam] Patch notes failed for ${game.title}: ${err.message}`);
+      console.warn(`[steam] Patch notes / news failed for ${game.title}: ${err.message}`);
     }
     await new Promise((r) => setTimeout(r, 400)); // be polite to the API
   }
@@ -220,7 +244,7 @@ export function startSteamSync() {
   setInterval(runStore, 30 * 60000).unref(); // each run only checks games past STEAM_STORE_INTERVAL_HOURS
 
   if (!hasSteamKey()) {
-    console.warn('[steam] STEAM_API_KEY is not set — Steam artwork and patch notes are disabled.');
+    console.warn('[steam] STEAM_API_KEY is not set — Steam artwork, patch notes and news are disabled.');
     return;
   }
   const run = async () => {

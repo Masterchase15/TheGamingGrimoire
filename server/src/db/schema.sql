@@ -295,3 +295,22 @@ ALTER TABLE games ADD COLUMN IF NOT EXISTS faq_url TEXT;
 ALTER TABLE games DROP COLUMN IF EXISTS faq;
 -- Questions the linked FAQ doesn't cover, written for the site: [{ q, a }].
 ALTER TABLE games ADD COLUMN IF NOT EXISTS unique_faq JSONB NOT NULL DEFAULT '[]';
+
+-- Steam news: developer announcements that aren't patch notes (video games only).
+-- Synced alongside patch notes from the same Steam announcements feed.
+CREATE TABLE IF NOT EXISTS game_news (
+  id            SERIAL PRIMARY KEY,
+  game_id       INT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+  gid           TEXT NOT NULL UNIQUE,
+  title         TEXT NOT NULL,
+  url           TEXT,
+  author        TEXT,
+  content       TEXT,
+  published_at  TIMESTAMPTZ NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS game_news_game_idx ON game_news (game_id, published_at DESC);
+
+-- Forum edits: when a thread's opening post or a reply was last edited by its author.
+ALTER TABLE forum_threads ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
