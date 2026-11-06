@@ -10,6 +10,7 @@ import {
   Clock,
   GitCommit,
   Info,
+  Megaphone,
   NotePencil,
   Plus,
   PuzzlePiece,
@@ -45,7 +46,7 @@ export default function Game() {
   // Kept in sync by the reviews section so the hero and subnav update after posting.
   const [reviewSummary, setReviewSummary] = useState(null);
 
-  // Honor #patch-notes / #discussions deep links once content exists.
+  // Honor #news / #patch-notes / #discussions deep links once content exists.
   useEffect(() => {
     if (data && location.hash) {
       requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView());
@@ -68,6 +69,7 @@ export default function Game() {
   }
 
   const { game, sections, hltb, stats, entry, threadCount, steam, updates, store, dlc, expansions, bgg } = data;
+  const news = data.news ?? [];
   const reviews = reviewSummary ?? data.reviews;
   const onSale = store?.price?.discount > 0;
   // "Read the wiki" opens the game's wiki article (Fandom or its own wiki), or the wiki's own site when its
@@ -105,6 +107,7 @@ export default function Game() {
 
   const subnav = [
     ['overview', 'Overview'],
+    showPatches && ['news', 'News', news.length],
     showPatches && ['patch-notes', 'Patch notes', updates.length],
     dlc && ['dlc', 'DLC', dlc.length],
     expansions && ['expansions', 'Expansions', expansions.length],
@@ -238,6 +241,20 @@ export default function Game() {
             </section>
 
             {showPatches && (
+              <section id="news" className="section">
+                <SectionHead
+                  index={sectionIndex('news')}
+                  kicker="Announcements"
+                  title="News"
+                  link={
+                    steam?.checkedAt && <span className="label">Checked {timeAgo(steam.checkedAt)}</span>
+                  }
+                />
+                <SteamPosts kind="news" slug={game.slug} posts={news} steam={steam} />
+              </section>
+            )}
+
+            {showPatches && (
               <section id="patch-notes" className="section">
                 <SectionHead
                   index={sectionIndex('patch-notes')}
@@ -247,7 +264,7 @@ export default function Game() {
                     steam?.checkedAt && <span className="label">Checked {timeAgo(steam.checkedAt)}</span>
                   }
                 />
-                <PatchNotes slug={game.slug} updates={updates} steam={steam} />
+                <SteamPosts kind="patch" slug={game.slug} posts={updates} steam={steam} />
               </section>
             )}
 
@@ -620,10 +637,37 @@ function VersionCard({ steam, latest }) {
   );
 }
 
-function PatchNotes({ slug, updates, steam }) {
+const POST_KINDS = {
+  patch: {
+    icon: GitCommit,
+    path: 'updates',
+    field: 'update',
+    noun: 'patch notes',
+    read: 'Read notes',
+    hide: 'Hide notes',
+    emptyTitle: 'No patch notes yet',
+    emptyText: 'The developer hasn’t posted patch notes on Steam recently.',
+  },
+  news: {
+    icon: Megaphone,
+    path: 'news',
+    field: 'news',
+    noun: 'news',
+    read: 'Read post',
+    hide: 'Hide post',
+    emptyTitle: 'No news yet',
+    emptyText: 'The developer hasn’t posted any news on Steam recently.',
+  },
+};
+
+// Steam posts (patch notes or news) as a timeline. Collapsed it shows only the
+// latest post; expanding reveals the rest.
+function SteamPosts({ kind, slug, posts, steam }) {
+  const k = POST_KINDS[kind];
   const [open, setOpen] = useState(null);
   const [bodies, setBodies] = useState({});
   const [loadingId, setLoadingId] = useState(null);
+  const [expanded, setExpanded] = useState(false);
 
   async function toggle(id) {
     if (open === id) return setOpen(null);
@@ -631,70 +675,97 @@ function PatchNotes({ slug, updates, steam }) {
     if (!bodies[id]) {
       setLoadingId(id);
       try {
-        const { update } = await api(`/games/${slug}/updates/${id}`);
-        setBodies((b) => ({ ...b, [id]: update.content || '_This post has no text._' }));
+        const res = await api(`/games/${slug}/${k.path}/${id}`);
+        setBodies((b) => ({ ...b, [id]: res[k.field].content || '_This post has no text._' }));
       } catch {
-        setBodies((b) => ({ ...b, [id]: '_Could not load these patch notes. Try again later._' }));
+        setBodies((b) => ({ ...b, [id]: `_Could not load this post. Try again later._` }));
       } finally {
         setLoadingId(null);
       }
     }
   }
 
+  function collapse() {
+    setExpanded(false);
+    if (open != null && open !== posts[0]?.id) setOpen(null);
+  }
+
   if (!steam) {
     return (
-      <Empty icon={GitCommit} title="Not on Steam">
-        This game isn’t sold on Steam, so its patch notes can’t be synced automatically.
+      <Empty icon={k.icon} title="Not on Steam">
+        This game isn’t sold on Steam, so its {k.noun} can’t be synced automatically.
       </Empty>
     );
   }
-  if (!updates.length) {
+  if (!posts.length) {
     return (
-      <Empty icon={GitCommit} title="No patch notes yet">
-        The developer hasn’t posted patch notes on Steam recently. We check for new ones every 30 minutes.
+      <Empty icon={k.icon} title={k.emptyTitle}>
+        {k.emptyText} We check for new ones every 30 minutes.
       </Empty>
     );
   }
 
+  const shown = expanded ? posts : posts.slice(0, 1);
+  const hidden = posts.length - 1;
+
   return (
-    <div className="timeline">
-      {updates.map((u, i) => (
-        <article key={u.id} className={`patch ${i === 0 ? 'latest' : ''}`}>
-          <div className="patch-head">
-            {u.version && <span className="chip chip-gold">v{u.version}</span>}
-            {i === 0 && <span className="chip chip-solid">Latest</span>}
-            {i !== 0 && isRecent(u.published_at) && <span className="chip chip-gold">New</span>}
-            <time className="label" dateTime={u.published_at}>
-              {new Date(u.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-            </time>
-          </div>
-          <h3 className="patch-title">{u.title}</h3>
-          {open !== u.id && u.excerpt && <p className="patch-excerpt">{u.excerpt}</p>}
-          <div className="patch-actions">
-            <button className="link-btn" onClick={() => toggle(u.id)} aria-expanded={open === u.id}>
-              {open === u.id ? (
-                <>
-                  Hide notes <CaretUp size={12} weight="bold" aria-hidden="true" />
-                </>
-              ) : (
-                <>
-                  Read notes <CaretDown size={12} weight="bold" aria-hidden="true" />
-                </>
-              )}
-            </button>
-            {u.url && (
-              <a className="link-btn muted" href={u.url} target="_blank" rel="noreferrer noopener">
-                Open on Steam <ArrowSquareOut size={12} aria-hidden="true" />
-              </a>
-            )}
-          </div>
-          {open === u.id && (
-            <div className="patch-body">
-              {loadingId === u.id ? <Spinner /> : <Markdown>{bodies[u.id]}</Markdown>}
+    <>
+      <div className="timeline">
+        {shown.map((u, i) => (
+          <article key={u.id} className={`patch ${i === 0 ? 'latest' : ''}`}>
+            <div className="patch-head">
+              {u.version && <span className="chip chip-gold">v{u.version}</span>}
+              {i === 0 && <span className="chip chip-solid">Latest</span>}
+              {i !== 0 && isRecent(u.published_at) && <span className="chip chip-gold">New</span>}
+              <time className="label" dateTime={u.published_at}>
+                {new Date(u.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              </time>
             </div>
+            <h3 className="patch-title">{u.title}</h3>
+            {open !== u.id && u.excerpt && <p className="patch-excerpt">{u.excerpt}</p>}
+            <div className="patch-actions">
+              <button className="link-btn" onClick={() => toggle(u.id)} aria-expanded={open === u.id}>
+                {open === u.id ? (
+                  <>
+                    {k.hide} <CaretUp size={12} weight="bold" aria-hidden="true" />
+                  </>
+                ) : (
+                  <>
+                    {k.read} <CaretDown size={12} weight="bold" aria-hidden="true" />
+                  </>
+                )}
+              </button>
+              {u.url && (
+                <a className="link-btn muted" href={u.url} target="_blank" rel="noreferrer noopener">
+                  Open on Steam <ArrowSquareOut size={12} aria-hidden="true" />
+                </a>
+              )}
+            </div>
+            {open === u.id && (
+              <div className="patch-body">
+                {loadingId === u.id ? <Spinner /> : <Markdown>{bodies[u.id]}</Markdown>}
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+      {hidden > 0 && (
+        <button
+          className="timeline-toggle"
+          onClick={() => (expanded ? collapse() : setExpanded(true))}
+          aria-expanded={expanded}
+        >
+          {expanded ? (
+            <>
+              Collapse <CaretUp size={12} weight="bold" aria-hidden="true" />
+            </>
+          ) : (
+            <>
+              Show {hidden} earlier {hidden === 1 ? 'post' : 'posts'} <CaretDown size={12} weight="bold" aria-hidden="true" />
+            </>
           )}
-        </article>
-      ))}
-    </div>
+        </button>
+      )}
+    </>
   );
 }

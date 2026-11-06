@@ -2224,6 +2224,27 @@ a.addon:hover::after {
 .patch-body .prose img {
   height: auto;
 }
+.timeline-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: var(--s5);
+  padding: 10px var(--s4);
+  border: 1px dashed var(--line-3);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+  cursor: pointer;
+}
+.timeline-toggle:hover {
+  border-color: var(--gold);
+  background: var(--bg-2);
+}
 .link-btn {
   display: inline-flex;
   align-items: center;
@@ -3365,6 +3386,12 @@ mark {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: #d4d4da;
+}
+.post-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: var(--s4);
 }
 
 /* ---------- Footer ---------- */

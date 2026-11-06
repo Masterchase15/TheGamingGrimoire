@@ -9,7 +9,7 @@ A wiki and community site for **video games, board games and card games**.
   - Ongoing games (live-service, competitive multiplayer, TCGs, board games): *Want to Play, Actively Playing, Taking a Break, Not Playing*
 - **HowLongToBeat:** finite video games show main / main+extras / completionist times, cached in the database.
 - **Fandom wikis:** each game's Wiki section pulls from its Fandom community via the MediaWiki API: an overview, featured pages, wiki search, and full articles rendered in-site (links stay inside the grimoire). Content is cached and attributed under CC BY-SA 3.0. Mappings live in `server/src/seed/data/fandom.js`.
-- **Steam integration:** library capsule art and hero banners for every game available on Steam, plus patch notes and the current version for video games. The server re-checks Steam every 30 minutes (and when a stale game page is opened), so new updates show up automatically.
+- **Steam integration:** library capsule art and hero banners for every game available on Steam, plus news posts, patch notes and the current version for video games. The server re-checks Steam every 30 minutes (and when a stale game page is opened), so new updates show up automatically.
 - **Prices and DLC:** every video game on Steam shows its current price (with sale discounts) and a DLC section, from Steam's public store API (no key needed). Prices are re-checked every 3 hours, so sales appear on their own.
 - **Expansions:** board and card games show an Expansions section, synced from BoardGameGeek for games with a `bgg_id` (needs `BGG_API_TOKEN` on the server), plus any expansions listed by hand in the game's JSON.
 - **Community:** user search, friend requests, a personal home feed (currently playing, recently visited, friend activity) and forums per game.
@@ -82,7 +82,7 @@ All three scripts take the same commands and options and work the same way. Each
 
 | Script | Looks up | The site then fetches |
 |---|---|---|
-| `add-vgame` | Steam (app id, developer, publisher, year, genres), Fandom | Steam artwork, patch notes, price and DLC, HowLongToBeat times, Fandom overview |
+| `add-vgame` | Steam (app id, developer, publisher, year, genres), Fandom | Steam artwork, news, patch notes, price and DLC, HowLongToBeat times, Fandom overview |
 | `add-bgame` | BoardGameGeek (`bgg_id`, players, play time, age, designers; needs `BGG_API_TOKEN`), Fandom | BoardGameGeek expansions, Fandom overview; Steam artwork only if you set `steam_appid` |
 | `add-cgame` | BoardGameGeek (same details as board games; needs `BGG_API_TOKEN`), Fandom | BoardGameGeek expansions, Fandom overview; Steam artwork only if you set `steam_appid` |
 

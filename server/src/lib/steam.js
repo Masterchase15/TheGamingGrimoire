@@ -96,26 +96,32 @@ function listify(body, ordered) {
   return `\n\n${items.map((it, i) => `${ordered ? `${i + 1}.` : '-'} ${it.replace(/\n+/g, ' ')}`).join('\n')}\n\n`;
 }
 
-/** Recent patch notes for an app, newest first. */
-export async function fetchPatchNotes(appid, { limit = 12, exclude } = {}) {
+/**
+ * Recent developer announcements for an app, newest first, split into patch notes
+ * and news (every announcement that isn't a patch). One request covers both.
+ */
+export async function fetchAnnouncements(appid, { patchLimit = 12, newsLimit = 12, exclude } = {}) {
   const url = `${API}/ISteamNews/GetNewsForApp/v2/?appid=${appid}&count=60&maxlength=0&feeds=steam_community_announcements&key=${process.env.STEAM_API_KEY}`;
   const json = await getJson(url);
   const skip = exclude ? new RegExp(exclude, 'i') : null;
-  const items = (json.appnews?.newsitems ?? [])
-    .filter((item) => isPatch(item) && !(skip && skip.test(item.title)))
-    .slice(0, limit);
-  return items.map((item) => {
+  const patches = [];
+  const news = [];
+  for (const item of json.appnews?.newsitems ?? []) {
+    const patch = isPatch(item) && !(skip && skip.test(item.title));
+    const list = patch ? patches : news;
+    if (list.length >= (patch ? patchLimit : newsLimit)) continue;
     const content = bbcodeToMarkdown(item.contents || '');
-    return {
+    list.push({
       gid: String(item.gid),
       title: item.title,
       url: item.url,
       author: item.author || null,
-      version: extractVersion(item.title, content),
+      version: patch ? extractVersion(item.title, content) : null,
       content,
       published_at: new Date(item.date * 1000),
-    };
-  });
+    });
+  }
+  return { patches, news };
 }
 
 /** Plain-text preview of a markdown body (no links, images or markup). */
