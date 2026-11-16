@@ -1,0 +1,27 @@
+# TheGamingGrimoire
+
+User-agent: GPTBot
+User-agent: ChatGPT-User
+User-agent: OAI-SearchBot
+User-agent: ClaudeBot
+User-agent: Claude-Web
+User-agent: anthropic-ai
+User-agent: CCBot
+User-agent: Bytespider
+User-agent: PerplexityBot
+User-agent: Amazonbot
+User-agent: meta-externalagent
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: cohere-ai
+User-agent: ElevenlabsCrawler
+User-agent: Diffbot
+User-agent: AhrefsBot
+User-agent: SemrushBot
+User-agent: MJ12bot
+Disallow: /
+
+# Search engines render pages with the API's data, so /api stays open to them.
+User-agent: *
+Disallow: /api/auth/
+Crawl-delay: 10
