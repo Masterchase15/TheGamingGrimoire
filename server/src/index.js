@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
+import compression from 'compression';
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './auth.js';
 import { migrate } from './db/migrate.js';
@@ -10,6 +11,7 @@ import { startBggSync } from './lib/bggSync.js';
 import { startWikiSync } from './lib/wikiSync.js';
 import { PORT, ROOT_DIR, UPLOADS_DIR, isProd } from './lib/env.js';
 import { loadSession } from './lib/session.js';
+import { blockBots, rateLimit } from './lib/botGuard.js';
 import gamesRouter from './routes/games.js';
 import searchRouter from './routes/search.js';
 import libraryRouter from './routes/library.js';
@@ -22,6 +24,12 @@ import adminRouter from './routes/admin.js';
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+
+app.use(blockBots);
+app.use(compression());
+
+// Wiki articles are fetched by title, so a crawler can walk them endlessly; cap it per IP.
+app.use(['/api/games/:slug/fandom', '/api/search'], rateLimit({ windowMs: 60_000, max: 40 }));
 
 // Better Auth must see the raw body, so it is mounted before express.json().
 app.all('/api/auth/*splat', toNodeHandler(auth));
@@ -55,6 +63,11 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found.' }));
 // In production the built React app is served from the same origin.
 const clientDist = path.join(ROOT_DIR, 'client', 'dist');
 if (fs.existsSync(clientDist)) {
+  // Vite puts a content hash in every /assets filename, so browsers and CDNs can keep them for good.
+  app.use(
+    '/assets',
+    express.static(path.join(clientDist, 'assets'), { immutable: true, maxAge: isProd ? '1y' : 0, index: false, fallthrough: false })
+  );
   app.use(express.static(clientDist, { maxAge: isProd ? '1h' : 0, index: false }));
   app.get('/{*splat}', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 }
