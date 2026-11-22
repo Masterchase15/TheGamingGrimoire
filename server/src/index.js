@@ -12,6 +12,8 @@ import { startWikiSync } from './lib/wikiSync.js';
 import { PORT, ROOT_DIR, UPLOADS_DIR, isProd } from './lib/env.js';
 import { loadSession } from './lib/session.js';
 import { blockBots, rateLimit } from './lib/botGuard.js';
+import { realClientIp } from './lib/clientIp.js';
+import { startCacheCleanup, logLargestTables } from './lib/cacheCleanup.js';
 import gamesRouter from './routes/games.js';
 import searchRouter from './routes/search.js';
 import libraryRouter from './routes/library.js';
@@ -25,6 +27,7 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+app.use(realClientIp);
 app.use(blockBots);
 app.use(compression());
 
@@ -69,7 +72,10 @@ if (fs.existsSync(clientDist)) {
     express.static(path.join(clientDist, 'assets'), { immutable: true, maxAge: isProd ? '1y' : 0, index: false, fallthrough: false })
   );
   app.use(express.static(clientDist, { maxAge: isProd ? '1h' : 0, index: false }));
-  app.get('/{*splat}', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+  // The HTML names the current hashed bundles, so browsers and Cloudflare must recheck it on each visit.
+  app.get('/{*splat}', (_req, res) =>
+    res.sendFile(path.join(clientDist, 'index.html'), { cacheControl: false, headers: { 'Cache-Control': 'no-cache' } })
+  );
 }
 
 app.use((err, _req, res, _next) => {
@@ -79,6 +85,9 @@ app.use((err, _req, res, _next) => {
 });
 
 await migrate();
+// Trim the wiki cache before anything else writes, so a nearly full disk gets room back first.
+await startCacheCleanup();
+await logLargestTables().catch((err) => console.warn(`[db] Could not read table sizes: ${err.message}`));
 await seed();
 startSteamSync();
 startBggSync();

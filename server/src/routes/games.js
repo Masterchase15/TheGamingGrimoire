@@ -221,6 +221,11 @@ async function wikiSource(slug) {
   return source;
 }
 
+// Wiki responses are the same for every visitor, so Cloudflare may keep them at its edge
+// (s-maxage) and browsers briefly (max-age). Repeat views then never reach Railway.
+const edgeCache = (res, hours) =>
+  res.set('Cache-Control', `public, max-age=300, s-maxage=${hours * 3600}, stale-if-error=86400`);
+
 const fandomFailure = (err) =>
   err instanceof HttpError ? err : new HttpError(502, 'The wiki could not be reached. Try again in a moment.');
 
@@ -232,6 +237,7 @@ router.get('/:slug/fandom', async (req, res) => {
   if (!source) return res.json({ fandom: externalWikiLink(game) });
   try {
     const fandom = await getOverview(source, { page: game.fandom_page || game.title, topics: game.fandom_topics });
+    edgeCache(res, 6);
     res.json({ fandom });
   } catch (err) {
     console.warn(`[fandom] overview ${req.params.slug}: ${err.message}`);
@@ -245,6 +251,7 @@ router.get('/:slug/fandom/page', async (req, res) => {
   const source = await wikiSource(req.params.slug);
   try {
     const article = await getArticle(source, title, req.params.slug);
+    edgeCache(res, 12);
     res.json({ article, wiki: source.id });
   } catch (err) {
     if (!(err instanceof HttpError)) console.warn(`[fandom] page ${title}: ${err.message}`);
